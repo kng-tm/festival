@@ -192,6 +192,15 @@
     cursor:pointer !important;
   }
   #reader__scan_region{ background: #10131A !important; }
+  /* html5-qrcode標準のスキャン枠（白）を無効化し、独自デザインの枠のみを表示する */
+  #reader__scan_region > div,
+  #qr-shaded-region {
+    border: none !important;
+    box-shadow: none !important;
+  }
+  #reader__scan_region video{
+    border: none !important;
+  }
   #reader__dashboard{
     background: transparent !important;
     color: #C7CAD1 !important;
