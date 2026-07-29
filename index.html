@@ -339,7 +339,7 @@
 
       <div class="field">
         <label for="login-id">ID</label>
-        <input id="login-id" type="text" placeholder="employee ID" autocomplete="username"
+        <input id="login-id" type="text" placeholder="user ID" autocomplete="username"
                inputmode="latin" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
       </div>
       <div class="field">
@@ -422,14 +422,14 @@
 
   function playSuccessSound() {
     // 明るく上昇する2音のチャイム
-    playTone(880.0, 0.12, 'sine', 0, 0.16);
-    playTone(1318.5, 0.16, 'sine', 0.09, 0.16);
+    playTone(880.0, 0.20, 'sine', 0, 0.16);
+    playTone(1318.5, 0.36, 'sine', 0.18, 0.16);
   }
 
   function playErrorSound() {
     // 低めの2音のブザー
-    playTone(220, 0.16, 'square', 0, 0.10);
-    playTone(180, 0.22, 'square', 0.14, 0.10);
+    playTone(220, 0.20, 'square', 0, 0.10);
+    playTone(180, 0.36, 'square', 0.18, 0.10);
   }
 
   function toggleMute() {
