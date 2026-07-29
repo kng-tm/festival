@@ -41,7 +41,7 @@
     display:flex;
     align-items:center;
     gap:10px;
-    margin-bottom: 22px;
+    margin-bottom: 18px;
     color: var(--text-dim);
     font-size: 13px;
     letter-spacing: 0.08em;
@@ -312,12 +312,11 @@
 </head>
 <body>
 
-  <div class="brand"><span class="dot"></span>SECURE CHECK-IN</div>
-
   <div class="card">
 
     <!-- ログイン画面 -->
     <div id="login-area">
+      <div class="brand"><span class="dot"></span>SECURE CHECK-IN</div>
       <h1>QRコード情報照会</h1>
       <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
@@ -358,8 +357,10 @@
       <div class="header-bottom">
         <h1>スキャン中</h1>
         <p class="subtitle">枠内にQRコードを収めてください。連続で読み取れます。</p>
+        <div class="brand" style="justify-content:center; margin-top:14px; margin-bottom:0;">
+          <span class="dot"></span>SECURE CHECK-IN
+        </div>
       </div>
-    </div>
 
   </div>
 
