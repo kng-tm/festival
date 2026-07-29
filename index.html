@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QR情報照会</title>
+<title>入場券QR照会</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -80,30 +80,6 @@
   }
   .mute-btn:hover{ background: var(--accent-soft); }
   .mute-btn:active{ transform: scale(0.94); }
-
-  /* ---- 認証完了までスキャン画面を隠すオーバーレイ ---- */
-  .auth-overlay{
-    position: absolute;
-    inset: 0;
-    background: var(--surface);
-    border-radius: var(--radius);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    z-index: 20;
-    color: var(--text-dim);
-    font-size: 14px;
-  }
-  .spinner-lg{
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
-    animation: spin .7s linear infinite;
-  }
 
   h1{
     font-family: 'Space Grotesk', sans-serif;
@@ -358,12 +334,12 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
-      <h1>QRコード情報照会</h1>
-      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
+      <h1>入場券QRコード照会</h1>
+      <p class="subtitle">配布したアカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
-        <input id="login-id" type="text" placeholder="employee ID" autocomplete="username"
+        <input id="login-id" type="text" placeholder="user ID" autocomplete="username"
                inputmode="latin" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
       </div>
       <div class="field">
@@ -378,12 +354,6 @@
 
     <!-- スキャン画面：照会結果を最上部に固定表示、タイトル・ブランドは下部 -->
     <div id="scan-area" class="hidden">
-
-      <!-- 認証が完了するまで、この上に重なってカメラ映像・結果を隠す -->
-      <div id="auth-overlay" class="auth-overlay hidden">
-        <span class="spinner-lg"></span>
-        <p>認証しています…</p>
-      </div>
 
       <button id="mute-toggle" class="mute-btn" onclick="toggleMute()" aria-label="音声のオン・オフを切り替え" type="button">🔊</button>
 
@@ -413,7 +383,7 @@
   </div>
 
 <script>
-  const GAS_URL = 'https://script.google.com/macros/s/AKfycbzNDDXHgrpaZd8LIgYF7zaCJMjlFOLfjYq-7qFxtuVsVZr5Kd1map29Y3qTkKLpA3z7/exec';
+  const GAS_URL = 'https://script.google.com/macros/s/AKfycbw7wPLL-AJHJrlnXsg9MgaS3mG5CD3ZoWoIj-tMMr0afF3j8hl4PgwCc5oBuvpJJf09/exec';
   let authToken = null;
   let scannerInstance = null;
   let authFailed = false;
@@ -452,14 +422,14 @@
 
   function playSuccessSound() {
     // 明るく上昇する2音のチャイム
-    playTone(880.0, 0.12, 'sine', 0, 0.16);
-    playTone(1318.5, 0.16, 'sine', 0.09, 0.16);
+    playTone(880.0, 0.25, 'sine', 0, 0.35);
+    playTone(1318.5, 0.50, 'sine', 0.20, 0.35);
   }
 
   function playErrorSound() {
     // 低めの2音のブザー
-    playTone(220, 0.16, 'square', 0, 0.10);
-    playTone(180, 0.22, 'square', 0.14, 0.10);
+    playTone(220, 0.25, 'square', 0, 0.35);
+    playTone(180, 0.50, 'square', 0.20, 0.35);
   }
 
   function toggleMute() {
@@ -501,7 +471,6 @@
     // カメラをこのクリック操作の中で同期的に起動する（awaitを挟まない）
     document.getElementById('login-area').classList.add('hidden');
     document.getElementById('scan-area').classList.remove('hidden');
-    document.getElementById('auth-overlay').classList.remove('hidden'); // 認証完了まで隠す
     startScanner();
 
     // 認証は裏で並行して進める
@@ -520,7 +489,6 @@
       if (data.success) {
         authToken = data.token;
         sessionStorage.setItem('auth_token', authToken);
-        document.getElementById('auth-overlay').classList.add('hidden'); // 認証完了、カメラ画面を表示
       } else {
         authFailed = true;
         stopScannerAndReturnToLogin(data.message);
@@ -536,7 +504,6 @@
       scannerInstance.clear().catch(() => {});
       scannerInstance = null;
     }
-    document.getElementById('auth-overlay').classList.add('hidden'); // 次回のためにリセット
     document.getElementById('scan-area').classList.add('hidden');
     document.getElementById('login-area').classList.remove('hidden');
     showLoginError(message);
@@ -616,8 +583,8 @@
         document.getElementById('res-dept').innerText = data.dept;
 
         const badge = data.alreadyChecked
-          ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
-          : '<span class="badge badge-ok">✓ 新規照会</span>';
+          ? '<span class="badge badge-warn">⚠ 入場済み（再入場）</span>'
+          : '<span class="badge badge-ok">✓ 新規入場</span>';
         document.getElementById('res-badge').innerHTML = badge;
 
         playSuccessSound();
