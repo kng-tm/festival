@@ -1,46 +1,334 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="https://unpkg.com/html5-qrcode"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100 min-h-screen flex flex-col items-center p-4">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR情報照会</title>
+<script src="https://unpkg.com/html5-qrcode"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #F5F3EE;
+    --surface: #FFFFFF;
+    --surface-sunken: #FAF8F3;
+    --border: #E2DDD1;
+    --text: #1E2126;
+    --text-dim: #767065;
+    --accent: #1F3B57;
+    --accent-soft: rgba(31,59,87,0.08);
+    --success: #1F8A5F;
+    --danger: #C0392B;
+    --radius: 14px;
+  }
 
-  <div class="w-full max-w-md bg-white rounded-xl shadow-md p-6 mt-4">
-    <h1 class="text-xl font-bold text-center mb-4">QR情報スキャナー</h1>
+  *{ box-sizing: border-box; }
+
+  body{
+    margin:0;
+    min-height:100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding: 28px 16px 40px;
+  }
+
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom: 22px;
+    color: var(--text-dim);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .brand .dot{
+    width:6px; height:6px; border-radius:50%;
+    background: var(--accent);
+  }
+
+  .card{
+    width:100%;
+    max-width: 400px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 24px 26px;
+    box-shadow: 0 16px 40px -24px rgba(30,33,38,0.25);
+  }
+
+  h1{
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 21px;
+    font-weight: 600;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .subtitle{
+    color: var(--text-dim);
+    font-size: 13.5px;
+    margin: 0 0 26px;
+    line-height:1.5;
+  }
+
+  .field{ margin-bottom: 14px; }
+  .field label{
+    display:block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-bottom: 7px;
+  }
+  .field input{
+    width:100%;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 13px 14px;
+    color: var(--text);
+    font-size: 15px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+  }
+  .field input::placeholder{ color: #B5AE9F; }
+  .field input:focus{
+    background: var(--surface);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .btn-primary{
+    width:100%;
+    margin-top: 8px;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #FFFFFF;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: transform .12s ease, filter .12s ease;
+  }
+  .btn-primary:hover{ filter: brightness(1.15); }
+  .btn-primary:active{ transform: scale(0.98); }
+
+  .error-msg{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-top: 14px;
+    padding: 11px 13px;
+    background: rgba(192,57,43,0.07);
+    border: 1px solid rgba(192,57,43,0.25);
+    border-radius: 9px;
+    color: var(--danger);
+    font-size: 13px;
+    line-height:1.4;
+  }
+  .error-msg::before{
+    content:"!";
+    flex-shrink:0;
+    width:16px; height:16px;
+    border-radius:50%;
+    background: var(--danger);
+    color: #FFFFFF;
+    font-size: 11px;
+    font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .hidden{ display:none !important; }
+
+  .scan-frame{
+    position: relative;
+    width:100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #10131A;
+    border: 1px solid var(--border);
+  }
+  .scan-frame::before{
+    content:"";
+    position:absolute; inset:0;
+    z-index: 5;
+    pointer-events:none;
+    background:
+      linear-gradient(to right, var(--accent) 3px, transparent 3px) 0 0,
+      linear-gradient(to right, var(--accent) 3px, transparent 3px) 0 100%,
+      linear-gradient(to left, var(--accent) 3px, transparent 3px) 100% 0,
+      linear-gradient(to left, var(--accent) 3px, transparent 3px) 100% 100%,
+      linear-gradient(to bottom, var(--accent) 3px, transparent 3px) 0 0,
+      linear-gradient(to bottom, var(--accent) 3px, transparent 3px) 100% 0,
+      linear-gradient(to top, var(--accent) 3px, transparent 3px) 0 100%,
+      linear-gradient(to top, var(--accent) 3px, transparent 3px) 100% 100%;
+    background-repeat: no-repeat;
+    background-size: 28px 28px;
+    margin: 20px;
+  }
+  #reader{ width:100% !important; height:100% !important; }
+  #reader video{ object-fit: cover; }
+  #reader img{ display:none; }
+  #reader__dashboard_section_csr button{
+    background: var(--accent) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 10px 18px !important;
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 14px !important;
+    cursor:pointer !important;
+  }
+  #reader__scan_region{ background: #10131A !important; }
+  #reader__dashboard{
+    background: transparent !important;
+    color: #C7CAD1 !important;
+    font-family: 'Inter', sans-serif !important;
+  }
+
+  .scan-caption{
+    text-align:center;
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 16px;
+    letter-spacing: 0.02em;
+  }
+
+  .result-box{
+    margin-top: 20px;
+    padding: 18px 18px 16px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .result-label{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+  .result-label .pulse{
+    width:7px; height:7px; border-radius:50%;
+    background: var(--success);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse{
+    0%,100%{ opacity:1; transform:scale(1); }
+    50%{ opacity:.4; transform:scale(0.7); }
+  }
+
+  .loading-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    color: var(--text-dim);
+    font-size: 14px;
+    padding: 4px 0;
+  }
+  .spinner{
+    width:15px; height:15px;
+    border-radius:50%;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+
+  .res-name{
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .res-dept{
+    color: var(--text-dim);
+    font-size: 14px;
+    margin: 0;
+  }
+  .res-dept:empty, .res-name:empty{ display:none; }
+
+  .res-error{
+    color: var(--danger);
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+  <div class="brand"><span class="dot"></span>SECURE CHECK-IN</div>
+
+  <div class="card">
 
     <!-- ログイン画面 -->
     <div id="login-area">
-      <input id="login-id" type="text" placeholder="ID" class="w-full border rounded p-2 mb-2">
-      <input id="login-pw" type="password" placeholder="パスワード" 
-       class="w-full border rounded p-2 mb-2"
-       onkeydown="if(event.key==='Enter') onLoginClick()">
+      <h1>QRコード情報照会</h1>
+      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
-        ログインしてスキャン開始
-      </button>
-      <p id="login-error" class="text-red-600 text-sm mt-2 hidden"></p>
+      <div class="field">
+        <label for="login-id">ID</label>
+        <input id="login-id" type="text" placeholder="employee ID" autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="login-pw">パスワード</label>
+        <input id="login-pw" type="password" placeholder="••••••••" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter') onLoginClick()">
+      </div>
+
+      <button class="btn-primary" onclick="onLoginClick()">ログインしてスキャン開始</button>
+      <div id="login-error" class="error-msg hidden"></div>
     </div>
 
     <!-- スキャン画面 -->
     <div id="scan-area" class="hidden">
-      <div id="reader" class="w-full rounded-lg overflow-hidden" style="min-height:250px;"></div>
-      <div id="result-box" class="mt-6 p-4 rounded-lg bg-gray-50 border hidden">
-        <div id="loading" class="text-blue-600 font-semibold hidden">検索中...</div>
-        <p class="text-lg font-bold"><span id="res-name"></span></p>
-        <p class="text-sm text-gray-600"><span id="res-dept"></span></p>
+      <h1>スキャン中</h1>
+      <p class="subtitle">枠内にQRコードを収めてください。</p>
+
+      <div class="scan-frame">
+        <div id="reader"></div>
+      </div>
+      <p class="scan-caption">自動的に読み取られます</p>
+
+      <div id="result-box" class="result-box hidden">
+        <div id="loading" class="loading-row hidden">
+          <span class="spinner"></span> 照会中...
+        </div>
+        <div id="info">
+          <div class="result-label"><span class="pulse"></span>照会結果</div>
+          <p class="res-name" id="res-name"></p>
+          <p class="res-dept" id="res-dept"></p>
+        </div>
       </div>
     </div>
+
   </div>
 
 <script>
   const GAS_URL = 'https://script.google.com/macros/s/AKfycbzNDDXHgrpaZd8LIgYF7zaCJMjlFOLfjYq-7qFxtuVsVZr5Kd1map29Y3qTkKLpA3z7/exec';
   let authToken = null;
   let scannerInstance = null;
-  let authFailed = false; // ログイン結果が返る前に照会が走らないようにするフラグ
+  let authFailed = false;
 
-  // ---- ボタン1回のクリックで「カメラ起動」と「ログイン認証」を並行して行う ----
   function onLoginClick() {
     const id = document.getElementById('login-id').value;
     const pw = document.getElementById('login-pw').value;
@@ -53,16 +341,13 @@
     document.getElementById('login-error').classList.add('hidden');
     authFailed = false;
 
-    // ① カメラをこのクリック操作の中で同期的に起動する（awaitを挟まない）
     document.getElementById('login-area').classList.add('hidden');
     document.getElementById('scan-area').classList.remove('hidden');
     startScanner();
 
-    // ② 認証は裏で並行して進める
     doLogin(id, pw);
   }
 
-  // ---- ログイン処理（非同期） ----
   async function doLogin(id, pw) {
     try {
       const res = await fetch(GAS_URL, {
@@ -85,7 +370,6 @@
     }
   }
 
-  // ---- 認証失敗時にカメラを止めてログイン画面へ戻す ----
   function stopScannerAndReturnToLogin(message) {
     if (scannerInstance) {
       scannerInstance.clear().catch(() => {});
@@ -102,29 +386,27 @@
     errEl.classList.remove('hidden');
   }
 
-  // ---- スキャナー起動処理 ----
   function startScanner() {
     scannerInstance = new Html5QrcodeScanner(
       "reader",
       {
         fps: 10,
-        qrbox: 250,
-        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] // 画像ファイル読込を廃止し、カメラのみに限定
+        qrbox: 230,
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
       }
     );
     scannerInstance.render((decodedText) => {
-      if (authFailed) return; // 認証前に読み取られても無視
+      if (authFailed) return;
       scannerInstance.pause();
       lookupUser(decodedText);
     });
   }
 
-  // ---- QR読み取り後の照会処理 ----
   async function lookupUser(qrId) {
     document.getElementById('result-box').classList.remove('hidden');
     document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('info').classList.add('hidden');
 
-    // 認証がまだ完了していない場合は少し待つ（通常はカメラ起動より認証の方が早く終わる想定だが念のため）
     let waitCount = 0;
     while (!authToken && !authFailed && waitCount < 50) {
       await new Promise(r => setTimeout(r, 100));
@@ -133,7 +415,8 @@
 
     if (!authToken) {
       document.getElementById('loading').classList.add('hidden');
-      document.getElementById('res-name').innerText = '認証エラー: ログインに失敗しました';
+      document.getElementById('info').classList.remove('hidden');
+      document.getElementById('res-name').innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
       document.getElementById('res-dept').innerText = '';
       return;
     }
@@ -146,12 +429,14 @@
     const data = await res.json();
 
     document.getElementById('loading').classList.add('hidden');
+    document.getElementById('info').classList.remove('hidden');
+
     if (data.success) {
-      document.getElementById('res-name').innerText = "氏名: " + data.name;
-      document.getElementById('res-dept').innerText = "部署: " + data.dept;
+      document.getElementById('res-name').innerText = data.name;
+      document.getElementById('res-dept').innerText = data.dept;
     } else {
-      document.getElementById('res-name').innerText = data.message;
-      document.getElementById('res-dept').innerText = "";
+      document.getElementById('res-name').innerHTML = '<span class="res-error">' + data.message + '</span>';
+      document.getElementById('res-dept').innerText = '';
       if (data.message.includes('認証エラー')) {
         authToken = null;
         sessionStorage.removeItem('auth_token');
