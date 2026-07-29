@@ -159,6 +159,10 @@
     background: #10131A;
     border: 1px solid var(--border);
   }
+  /* html5-qrcode標準の白い縁取りを、デザインに合わせて紺色に変更 */
+  #qr-shaded-region > div{
+    background-color: var(--accent) !important;
+  }
   #reader{ width:100% !important; height:100% !important; }
   #reader video{ object-fit: cover; }
   #reader img{ display:none; }
