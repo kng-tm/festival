@@ -159,24 +159,6 @@
     background: #10131A;
     border: 1px solid var(--border);
   }
-  .scan-frame::before{
-    content:"";
-    position:absolute; inset:0;
-    z-index: 5;
-    pointer-events:none;
-    background:
-      linear-gradient(to right, var(--accent) 3px, transparent 3px) 0 0,
-      linear-gradient(to right, var(--accent) 3px, transparent 3px) 0 100%,
-      linear-gradient(to left, var(--accent) 3px, transparent 3px) 100% 0,
-      linear-gradient(to left, var(--accent) 3px, transparent 3px) 100% 100%,
-      linear-gradient(to bottom, var(--accent) 3px, transparent 3px) 0 0,
-      linear-gradient(to bottom, var(--accent) 3px, transparent 3px) 100% 0,
-      linear-gradient(to top, var(--accent) 3px, transparent 3px) 0 100%,
-      linear-gradient(to top, var(--accent) 3px, transparent 3px) 100% 100%;
-    background-repeat: no-repeat;
-    background-size: 28px 28px;
-    margin: 20px;
-  }
   #reader{ width:100% !important; height:100% !important; }
   #reader video{ object-fit: cover; }
   #reader img{ display:none; }
@@ -192,15 +174,6 @@
     cursor:pointer !important;
   }
   #reader__scan_region{ background: #10131A !important; }
-  /* html5-qrcode標準のスキャン枠（白）を無効化し、独自デザインの枠のみを表示する */
-  #reader__scan_region > div,
-  #qr-shaded-region {
-    border: none !important;
-    box-shadow: none !important;
-  }
-  #reader__scan_region video{
-    border: none !important;
-  }
   #reader__dashboard{
     background: transparent !important;
     color: #C7CAD1 !important;
