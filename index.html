@@ -282,6 +282,24 @@
     font-size: 15px;
     font-weight: 600;
   }
+  .badge{
+    display: inline-block;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+  }
+  .badge-ok{
+    background: rgba(31,138,95,0.1);
+    color: var(--success);
+    border: 1px solid rgba(31,138,95,0.3);
+  }
+  .badge-warn{
+    background: rgba(232,179,57,0.12);
+    color: #8A6512;
+    border: 1px solid rgba(232,179,57,0.4);
+  }
 </style>
 </head>
 <body>
@@ -328,6 +346,12 @@
           <div class="result-label"><span class="pulse"></span>照会結果</div>
           <p class="res-name" id="res-name"></p>
           <p class="res-dept" id="res-dept"></p>
+          <div id="info">
+            <div class="result-label"><span class="pulse"></span>照会結果</div>
+            <p class="res-name" id="res-name"></p>
+            <p class="res-dept" id="res-dept"></p>
+            <p id="res-badge" style="margin-top:10px;"></p>
+          </div>
         </div>
       </div>
     </div>
@@ -445,6 +469,12 @@
     if (data.success) {
       document.getElementById('res-name').innerText = data.name;
       document.getElementById('res-dept').innerText = data.dept;
+    
+      // 照会済みかどうかのバッジ表示を追加
+      const badge = data.alreadyChecked
+        ? '<span class="badge badge-warn">⚠ 照会済み(再スキャン)</span>'
+        : '<span class="badge badge-ok">✓ 新規照会</span>';
+      document.getElementById('res-badge').innerHTML = badge;
     } else {
       document.getElementById('res-name').innerHTML = '<span class="res-error">' + data.message + '</span>';
       document.getElementById('res-dept').innerText = '';
