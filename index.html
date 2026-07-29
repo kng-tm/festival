@@ -15,16 +15,10 @@
     <div id="login-area">
       <input id="login-id" type="text" placeholder="ID" class="w-full border rounded p-2 mb-2">
       <input id="login-pw" type="password" placeholder="パスワード" class="w-full border rounded p-2 mb-2">
-      <button onclick="doLogin()" class="w-full bg-blue-600 text-white font-bold py-2 rounded">ログイン</button>
-      <p id="login-error" class="text-red-600 text-sm mt-2 hidden"></p>
-    </div>
-
-    <!-- ログイン後、まずはこのボタンだけを表示（ユーザー操作としてカメラを起動するため） -->
-    <div id="start-scan-area" class="hidden">
-      <p class="text-center text-green-700 font-semibold mb-3">ログインしました</p>
-      <button onclick="startScanner()" class="w-full bg-green-600 text-white font-bold py-3 rounded">
-        カメラを起動してスキャン開始
+      <button onclick="onLoginClick()" class="w-full bg-blue-600 text-white font-bold py-2 rounded">
+        ログインしてスキャン開始
       </button>
+      <p id="login-error" class="text-red-600 text-sm mt-2 hidden"></p>
     </div>
 
     <!-- スキャン画面 -->
@@ -41,47 +35,85 @@
 <script>
   const GAS_URL = 'https://script.google.com/macros/s/AKfycbzNDDXHgrpaZd8LIgYF7zaCJMjlFOLfjYq-7qFxtuVsVZr5Kd1map29Y3qTkKLpA3z7/exec';
   let authToken = null;
+  let scannerInstance = null;
+  let authFailed = false; // ログイン結果が返る前に照会が走らないようにするフラグ
 
-  // ---- ログイン処理 ----
-  async function doLogin() {
+  // ---- ボタン1回のクリックで「カメラ起動」と「ログイン認証」を並行して行う ----
+  function onLoginClick() {
     const id = document.getElementById('login-id').value;
     const pw = document.getElementById('login-pw').value;
+
+    if (!id || !pw) {
+      showLoginError('IDとパスワードを入力してください');
+      return;
+    }
+
     document.getElementById('login-error').classList.add('hidden');
+    authFailed = false;
 
-    const res = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'login', id: id, password: pw })
-    });
-    const data = await res.json();
+    // ① カメラをこのクリック操作の中で同期的に起動する（awaitを挟まない）
+    document.getElementById('login-area').classList.add('hidden');
+    document.getElementById('scan-area').classList.remove('hidden');
+    startScanner();
 
-    if (data.success) {
-      authToken = data.token;
-      sessionStorage.setItem('auth_token', authToken);
+    // ② 認証は裏で並行して進める
+    doLogin(id, pw);
+  }
 
-      document.getElementById('login-area').classList.add('hidden');
-      // ここでは scan-area を直接開かず、ボタンを表示するだけに留める
-      // （await の後にカメラを起動すると「ユーザー操作」とみなされずブロックされる端末があるため）
-      document.getElementById('start-scan-area').classList.remove('hidden');
-    } else {
-      const errEl = document.getElementById('login-error');
-      errEl.textContent = data.message;
-      errEl.classList.remove('hidden');
+  // ---- ログイン処理（非同期） ----
+  async function doLogin(id, pw) {
+    try {
+      const res = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'login', id: id, password: pw })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        authToken = data.token;
+        sessionStorage.setItem('auth_token', authToken);
+      } else {
+        authFailed = true;
+        stopScannerAndReturnToLogin(data.message);
+      }
+    } catch (err) {
+      authFailed = true;
+      stopScannerAndReturnToLogin('通信エラーが発生しました');
     }
   }
 
-  // ---- スキャナー起動処理（ボタンのonclickから直接・同期的に呼ばれる） ----
-  function startScanner() {
-    document.getElementById('start-scan-area').classList.add('hidden');
-    document.getElementById('scan-area').classList.remove('hidden');
+  // ---- 認証失敗時にカメラを止めてログイン画面へ戻す ----
+  function stopScannerAndReturnToLogin(message) {
+    if (scannerInstance) {
+      scannerInstance.clear().catch(() => {});
+      scannerInstance = null;
+    }
+    document.getElementById('scan-area').classList.add('hidden');
+    document.getElementById('login-area').classList.remove('hidden');
+    showLoginError(message);
+  }
 
-    // 表示反映を1フレーム待ってから初期化する
-    requestAnimationFrame(() => {
-      const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-      scanner.render((decodedText) => {
-        scanner.pause();
-        lookupUser(decodedText);
-      });
+  function showLoginError(message) {
+    const errEl = document.getElementById('login-error');
+    errEl.textContent = message;
+    errEl.classList.remove('hidden');
+  }
+
+  // ---- スキャナー起動処理 ----
+  function startScanner() {
+    scannerInstance = new Html5QrcodeScanner(
+      "reader",
+      {
+        fps: 10,
+        qrbox: 250,
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] // 画像ファイル読込を廃止し、カメラのみに限定
+      }
+    );
+    scannerInstance.render((decodedText) => {
+      if (authFailed) return; // 認証前に読み取られても無視
+      scannerInstance.pause();
+      lookupUser(decodedText);
     });
   }
 
@@ -89,6 +121,20 @@
   async function lookupUser(qrId) {
     document.getElementById('result-box').classList.remove('hidden');
     document.getElementById('loading').classList.remove('hidden');
+
+    // 認証がまだ完了していない場合は少し待つ（通常はカメラ起動より認証の方が早く終わる想定だが念のため）
+    let waitCount = 0;
+    while (!authToken && !authFailed && waitCount < 50) {
+      await new Promise(r => setTimeout(r, 100));
+      waitCount++;
+    }
+
+    if (!authToken) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('res-name').innerText = '認証エラー: ログインに失敗しました';
+      document.getElementById('res-dept').innerText = '';
+      return;
+    }
 
     const res = await fetch(GAS_URL, {
       method: 'POST',
@@ -105,11 +151,9 @@
       document.getElementById('res-name').innerText = data.message;
       document.getElementById('res-dept').innerText = "";
       if (data.message.includes('認証エラー')) {
-        // トークン切れの場合は再ログインを促す
         authToken = null;
         sessionStorage.removeItem('auth_token');
-        document.getElementById('scan-area').classList.add('hidden');
-        document.getElementById('login-area').classList.remove('hidden');
+        stopScannerAndReturnToLogin('セッションが切れました。再度ログインしてください');
       }
     }
   }
