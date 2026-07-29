@@ -163,7 +163,15 @@
   #qr-shaded-region > div{
     background-color: var(--accent) !important;
   }
-  #reader{ width:100% !important; height:100% !important; }
+  /* #readerの黒背景をやめて、白系の背景にする */
+  #reader{
+    background: var(--surface) !important;
+  }
+  
+  /* カメラ映像(video)の部分だけ黒背景にする */
+  #reader__scan_region video{
+    background: #10131A !important;
+  }
   #reader video{ object-fit: cover; }
   #reader img{ display:none; }
   #html5-qrcode-button-camera-stop,
@@ -178,7 +186,6 @@
     font-size: 14px !important;
     cursor: pointer !important;
   }
-  #reader__scan_region{ background: #10131A !important; }
   .scan-frame #reader__dashboard{
     background: var(--surface) !important;
     padding: 14px 0 4px !important;
