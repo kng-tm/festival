@@ -73,12 +73,12 @@
   .subtitle{
     color: var(--text-dim);
     font-size: 13.5px;
-    margin: 0 0 26px;
+    margin: 0;
     line-height:1.5;
   }
 
   /* ---- ログインフォーム ---- */
-  .field{ margin-bottom: 14px; }
+  .field{ margin-bottom: 14px; margin-top: 20px; }
   .field label{
     display:block;
     font-size: 12px;
@@ -151,8 +151,7 @@
   }
   .hidden{ display:none !important; }
 
-  /* ---- スキャン画面全体の枠 ----
-     映像とボタン欄がここに縦積みされる。全体は白背景・角丸。 */
+  /* ---- スキャン画面全体の枠 ---- */
   .scan-frame{
     position: relative;
     width:100%;
@@ -162,13 +161,11 @@
     border: 1px solid var(--border);
   }
 
-  /* html5-qrcodeが生成する最外周div。白背景に統一し、正方形化はしない */
   #reader{
     width:100% !important;
     background: var(--surface) !important;
   }
 
-  /* 映像が映る領域だけを正方形にし、黒背景を残す */
   #reader__scan_region{
     aspect-ratio: 1 / 1 !important;
     overflow: hidden !important;
@@ -180,14 +177,12 @@
     height: 100% !important;
     object-fit: cover;
   }
-  #reader img{ display:none; } /* ライブラリのInfoアイコンを非表示 */
+  #reader img{ display:none; }
 
-  /* スキャン範囲の白い縁取り(html5-qrcode標準)を、デザインのアクセント色に変更 */
   div#qr-shaded-region > div{
     background-color: var(--accent) !important;
   }
 
-  /* 操作ボタン欄(Stop Scanningなど)。白背景に統一 */
   #reader__dashboard{
     background: var(--surface) !important;
     padding: 14px 4px 4px !important;
@@ -211,17 +206,18 @@
     text-align:center;
     color: var(--text-dim);
     font-size: 13px;
-    margin-top: 16px;
+    margin: 16px 0 24px;
     letter-spacing: 0.02em;
   }
 
-  /* ---- 結果表示 ---- */
+  /* ---- 照会結果（画面上部に固定表示） ---- */
   .result-box{
-    margin-top: 20px;
     padding: 18px 18px 16px;
     background: var(--surface-sunken);
     border: 1px solid var(--border);
     border-radius: 12px;
+    margin-bottom: 22px;
+    min-height: 88px;
   }
   .result-label{
     display:flex;
@@ -242,6 +238,11 @@
   @keyframes pulse{
     0%,100%{ opacity:1; transform:scale(1); }
     50%{ opacity:.4; transform:scale(0.7); }
+  }
+
+  .placeholder-row{
+    color: var(--text-dim);
+    font-size: 14px;
   }
 
   .loading-row{
@@ -274,7 +275,6 @@
     font-size: 14px;
     margin: 0;
   }
-  .res-dept:empty, .res-name:empty{ display:none; }
 
   .res-error{
     color: var(--danger);
@@ -282,8 +282,10 @@
     font-size: 15px;
     font-weight: 600;
   }
+
   .badge{
     display: inline-block;
+    margin-top: 10px;
     padding: 5px 11px;
     border-radius: 999px;
     font-size: 12.5px;
@@ -300,6 +302,12 @@
     color: #8A6512;
     border: 1px solid rgba(232,179,57,0.4);
   }
+
+  /* ---- ヘッダー(タイトル)は画面下部に配置 ---- */
+  .header-bottom{
+    margin-top: 22px;
+    text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -311,12 +319,12 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <h1>QRコード情報照会</h1>
-      <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
+      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
-        <input id="login-id" type="text" placeholder="user ID" autocomplete="username"
-       inputmode="latin" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <input id="login-id" type="text" placeholder="employee ID" autocomplete="username"
+               inputmode="latin" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
       </div>
       <div class="field">
         <label for="login-pw">パスワード</label>
@@ -328,31 +336,28 @@
       <div id="login-error" class="error-msg hidden"></div>
     </div>
 
-    <!-- スキャン画面 -->
+    <!-- スキャン画面：照会結果を最上部に固定表示 -->
     <div id="scan-area" class="hidden">
-      <h1>スキャン中</h1>
-      <p class="subtitle">枠内にQRコードを収めてください。</p>
 
-      <div class="scan-frame">
-        <div id="reader"></div>
-      </div>
-      <p class="scan-caption">自動的に読み取られます</p>
-
-      <div id="result-box" class="result-box hidden">
+      <div id="result-box" class="result-box">
         <div id="loading" class="loading-row hidden">
           <span class="spinner"></span> 照会中...
         </div>
         <div id="info">
           <div class="result-label"><span class="pulse"></span>照会結果</div>
-          <p class="res-name" id="res-name"></p>
+          <p class="res-name placeholder-row" id="res-name">QRコードをスキャンしてください</p>
           <p class="res-dept" id="res-dept"></p>
-          <div id="info">
-            <div class="result-label"><span class="pulse"></span>照会結果</div>
-            <p class="res-name" id="res-name"></p>
-            <p class="res-dept" id="res-dept"></p>
-            <p id="res-badge" style="margin-top:10px;"></p>
-          </div>
+          <p id="res-badge"></p>
         </div>
+      </div>
+
+      <div class="scan-frame">
+        <div id="reader"></div>
+      </div>
+
+      <div class="header-bottom">
+        <h1>スキャン中</h1>
+        <p class="subtitle">枠内にQRコードを収めてください。連続で読み取れます。</p>
       </div>
     </div>
 
@@ -363,6 +368,16 @@
   let authToken = null;
   let scannerInstance = null;
   let authFailed = false;
+  let isLookupInProgress = false;
+  let lastScannedId = null;
+  let lastScanTime = 0;
+  const SCAN_COOLDOWN_MS = 2500; // 同一QRコードの連続誤検出を防ぐための間隔
+
+  document.getElementById('login-id').addEventListener('input', function (e) {
+    e.target.value = e.target.value
+      .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+      .replace(/[^A-Za-z0-9]/g, '');
+  });
 
   function onLoginClick() {
     const id = document.getElementById('login-id').value;
@@ -431,14 +446,24 @@
       }
     );
     scannerInstance.render((decodedText) => {
-      if (authFailed) return;
-      scannerInstance.pause();
+      if (authFailed || isLookupInProgress) return;
+
+      const now = Date.now();
+      // 同じQRコードを短時間に連続検出した場合は無視する（カメラに映り続けている間の誤検出防止）
+      if (decodedText === lastScannedId && (now - lastScanTime) < SCAN_COOLDOWN_MS) {
+        return;
+      }
+      lastScannedId = decodedText;
+      lastScanTime = now;
+
       lookupUser(decodedText);
+      // pause/resumeは行わない：カメラは止めず、次のQRコードを継続して検出する
     });
   }
 
   async function lookupUser(qrId) {
-    document.getElementById('result-box').classList.remove('hidden');
+    isLookupInProgress = true;
+
     document.getElementById('loading').classList.remove('hidden');
     document.getElementById('info').classList.add('hidden');
 
@@ -451,38 +476,46 @@
     if (!authToken) {
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('info').classList.remove('hidden');
+      document.getElementById('res-name').classList.remove('placeholder-row');
       document.getElementById('res-name').innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
       document.getElementById('res-dept').innerText = '';
+      document.getElementById('res-badge').innerHTML = '';
+      isLookupInProgress = false;
       return;
     }
 
-    const res = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'lookup', token: authToken, qrId: qrId })
-    });
-    const data = await res.json();
+    try {
+      const res = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'lookup', token: authToken, qrId: qrId })
+      });
+      const data = await res.json();
 
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('info').classList.remove('hidden');
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('info').classList.remove('hidden');
+      document.getElementById('res-name').classList.remove('placeholder-row');
 
-    if (data.success) {
-      document.getElementById('res-name').innerText = data.name;
-      document.getElementById('res-dept').innerText = data.dept;
-    
-      // 照会済みかどうかのバッジ表示を追加
-      const badge = data.alreadyChecked
-        ? '<span class="badge badge-warn">⚠ 照会済み(再スキャン)</span>'
-        : '<span class="badge badge-ok">✓ 新規照会</span>';
-      document.getElementById('res-badge').innerHTML = badge;
-    } else {
-      document.getElementById('res-name').innerHTML = '<span class="res-error">' + data.message + '</span>';
-      document.getElementById('res-dept').innerText = '';
-      if (data.message.includes('認証エラー')) {
-        authToken = null;
-        sessionStorage.removeItem('auth_token');
-        stopScannerAndReturnToLogin('セッションが切れました。再度ログインしてください');
+      if (data.success) {
+        document.getElementById('res-name').innerText = data.name;
+        document.getElementById('res-dept').innerText = data.dept;
+
+        const badge = data.alreadyChecked
+          ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
+          : '<span class="badge badge-ok">✓ 新規照会</span>';
+        document.getElementById('res-badge').innerHTML = badge;
+      } else {
+        document.getElementById('res-name').innerHTML = '<span class="res-error">' + data.message + '</span>';
+        document.getElementById('res-dept').innerText = '';
+        document.getElementById('res-badge').innerHTML = '';
+        if (data.message.includes('認証エラー')) {
+          authToken = null;
+          sessionStorage.removeItem('auth_token');
+          stopScannerAndReturnToLogin('セッションが切れました。再度ログインしてください');
+        }
       }
+    } finally {
+      isLookupInProgress = false;
     }
   }
 </script>
