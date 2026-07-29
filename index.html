@@ -423,13 +423,13 @@
   function playSuccessSound() {
     // 明るく上昇する2音のチャイム
     playTone(880.0, 0.25, 'sine', 0, 0.35);
-    playTone(1318.5, 0.40, 'sine', 0.20, 0.35);
+    playTone(1318.5, 0.50, 'sine', 0.20, 0.35);
   }
 
   function playErrorSound() {
     // 低めの2音のブザー
-    playTone(220, 0.20, 'square', 0, 0.35);
-    playTone(180, 0.40, 'square', 0.20, 0.35);
+    playTone(220, 0.25, 'square', 0, 0.35);
+    playTone(180, 0.50, 'square', 0.20, 0.35);
   }
 
   function toggleMute() {
