@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QR入場券照会</title>
+<title>入場券QR照会</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -52,6 +52,7 @@
   }
 
   .card{
+    position: relative;
     width:100%;
     max-width: 400px;
     background: var(--surface);
@@ -60,6 +61,25 @@
     padding: 28px 24px 26px;
     box-shadow: 0 16px 40px -24px rgba(30,33,38,0.25);
   }
+
+  .mute-btn{
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    cursor: pointer;
+    transition: background .15s ease, transform .12s ease;
+  }
+  .mute-btn:hover{ background: var(--accent-soft); }
+  .mute-btn:active{ transform: scale(0.94); }
 
   h1{
     font-family: 'Space Grotesk', sans-serif;
@@ -314,12 +334,12 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
-      <h1>QRコード入場券照会</h1>
-      <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
+      <h1>入場券QRコード照会</h1>
+      <p class="subtitle">配布したアカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
-        <input id="login-id" type="text" placeholder="user ID" autocomplete="username"
+        <input id="login-id" type="text" placeholder="employee ID" autocomplete="username"
                inputmode="latin" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
       </div>
       <div class="field">
@@ -334,6 +354,8 @@
 
     <!-- スキャン画面：照会結果を最上部に固定表示、タイトル・ブランドは下部 -->
     <div id="scan-area" class="hidden">
+
+      <button id="mute-toggle" class="mute-btn" onclick="toggleMute()" aria-label="音声のオン・オフを切り替え" type="button">🔊</button>
 
       <div id="result-box" class="result-box">
         <div id="loading" class="loading-row hidden">
@@ -370,6 +392,60 @@
   let lastScanTime = 0;
   const SCAN_COOLDOWN_MS = 2500; // 同一QRコードの連続誤検出を防ぐための間隔
 
+  // ---- 通知音（Web Audio APIでその場で合成。外部音源ファイルは一切使用しない） ----
+  let audioCtx = null;
+  let isMuted = sessionStorage.getItem('qr_scanner_muted') === 'true';
+
+  function initAudio() {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) audioCtx = new AudioContextClass();
+    }
+  }
+
+  function playTone(frequency, duration, type, delay, volume) {
+    if (isMuted || !audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = frequency;
+
+    const startTime = audioCtx.currentTime + (delay || 0);
+    gain.gain.setValueAtTime(volume || 0.15, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(startTime);
+    osc.stop(startTime + duration);
+  }
+
+  function playSuccessSound() {
+    // 明るく上昇する2音のチャイム
+    playTone(880.0, 0.12, 'sine', 0, 0.16);
+    playTone(1318.5, 0.16, 'sine', 0.09, 0.16);
+  }
+
+  function playErrorSound() {
+    // 低めの2音のブザー
+    playTone(220, 0.16, 'square', 0, 0.10);
+    playTone(180, 0.22, 'square', 0.14, 0.10);
+  }
+
+  function toggleMute() {
+    isMuted = !isMuted;
+    sessionStorage.setItem('qr_scanner_muted', String(isMuted));
+    updateMuteButton();
+  }
+
+  function updateMuteButton() {
+    const btn = document.getElementById('mute-toggle');
+    if (!btn) return;
+    btn.textContent = isMuted ? '🔇' : '🔊';
+    btn.setAttribute('aria-label', isMuted ? 'ミュート中（クリックで解除）' : '音声オン（クリックでミュート）');
+  }
+  updateMuteButton(); // 初期表示に反映
+
   // IDフィールド:全角英数字を自動的に半角に変換し、それ以外の文字は除去
   document.getElementById('login-id').addEventListener('input', function (e) {
     e.target.value = e.target.value
@@ -388,6 +464,9 @@
 
     document.getElementById('login-error').classList.add('hidden');
     authFailed = false;
+
+    // AudioContextはユーザー操作の中で生成する必要があるため、ここで初期化する
+    initAudio();
 
     // カメラをこのクリック操作の中で同期的に起動する（awaitを挟まない）
     document.getElementById('login-area').classList.add('hidden');
@@ -481,6 +560,7 @@
       nameEl.innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
       document.getElementById('res-dept').innerText = '';
       document.getElementById('res-badge').innerHTML = '';
+      playErrorSound();
       isLookupInProgress = false;
       return;
     }
@@ -506,10 +586,15 @@
           ? '<span class="badge badge-warn">⚠ 入場済み（再入場）</span>'
           : '<span class="badge badge-ok">✓ 新規入場</span>';
         document.getElementById('res-badge').innerHTML = badge;
+
+        playSuccessSound();
       } else {
         nameEl.innerHTML = '<span class="res-error">' + data.message + '</span>';
         document.getElementById('res-dept').innerText = '';
         document.getElementById('res-badge').innerHTML = '';
+
+        playErrorSound();
+
         if (data.message.includes('認証エラー')) {
           authToken = null;
           sessionStorage.removeItem('auth_token');
