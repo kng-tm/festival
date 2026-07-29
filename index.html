@@ -196,9 +196,9 @@
   }
   #html5-qrcode-button-camera-stop,
   #html5-qrcode-button-camera-start{
-    background: #FFFFFF !important;
-    color: var(--accent) !important;
-    border: 1.5px solid var(--accent) !important;
+    background: var(--accent) !important;
+    color: #FFFFFF !important;
+    border: none !important;
     border-radius: 8px !important;
     padding: 10px 18px !important;
     font-family: 'Space Grotesk', sans-serif !important;
@@ -293,11 +293,12 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <h1>QRコード情報照会</h1>
-      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
+      <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
-        <input id="login-id" type="text" placeholder="employee ID" autocomplete="username">
+        <input id="login-id" type="text" placeholder="user ID" autocomplete="username"
+       inputmode="latin" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
       </div>
       <div class="field">
         <label for="login-pw">パスワード</label>
