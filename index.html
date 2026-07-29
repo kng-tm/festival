@@ -41,7 +41,6 @@
     display:flex;
     align-items:center;
     gap:10px;
-    margin-bottom: 18px;
     color: var(--text-dim);
     font-size: 13px;
     letter-spacing: 0.08em;
@@ -179,6 +178,7 @@
   }
   #reader img{ display:none; }
 
+  /* html5-qrcode標準の白い縁取りを、デザインのアクセント色に変更 */
   div#qr-shaded-region > div{
     background-color: var(--accent) !important;
   }
@@ -200,14 +200,6 @@
     font-weight: 600 !important;
     font-size: 14px !important;
     cursor: pointer !important;
-  }
-
-  .scan-caption{
-    text-align:center;
-    color: var(--text-dim);
-    font-size: 13px;
-    margin: 16px 0 24px;
-    letter-spacing: 0.02em;
   }
 
   /* ---- 照会結果（画面上部に固定表示） ---- */
@@ -240,11 +232,6 @@
     50%{ opacity:.4; transform:scale(0.7); }
   }
 
-  .placeholder-row{
-    color: var(--text-dim);
-    font-size: 14px;
-  }
-
   .loading-row{
     display:flex;
     align-items:center;
@@ -269,6 +256,12 @@
     margin: 0 0 4px;
     letter-spacing: -0.01em;
     color: var(--text);
+  }
+  .res-name.placeholder-row{
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-dim);
   }
   .res-dept{
     color: var(--text-dim);
@@ -303,10 +296,14 @@
     border: 1px solid rgba(232,179,57,0.4);
   }
 
-  /* ---- ヘッダー(タイトル)は画面下部に配置 ---- */
+  /* ---- スキャン画面下部：タイトル・説明文・ブランド ---- */
   .header-bottom{
     margin-top: 22px;
     text-align: center;
+  }
+  .header-bottom .brand{
+    justify-content: center;
+    margin-top: 14px;
   }
 </style>
 </head>
@@ -316,9 +313,9 @@
 
     <!-- ログイン画面 -->
     <div id="login-area">
-      <div class="brand"><span class="dot"></span>SECURE CHECK-IN</div>
+      <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
       <h1>QRコード情報照会</h1>
-      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
+      <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
@@ -335,7 +332,7 @@
       <div id="login-error" class="error-msg hidden"></div>
     </div>
 
-    <!-- スキャン画面：照会結果を最上部に固定表示 -->
+    <!-- スキャン画面：照会結果を最上部に固定表示、タイトル・ブランドは下部 -->
     <div id="scan-area" class="hidden">
 
       <div id="result-box" class="result-box">
@@ -357,15 +354,14 @@
       <div class="header-bottom">
         <h1>スキャン中</h1>
         <p class="subtitle">枠内にQRコードを収めてください。連続で読み取れます。</p>
-        <div class="brand" style="justify-content:center; margin-top:14px; margin-bottom:0;">
-          <span class="dot"></span>SECURE CHECK-IN
-        </div>
+        <div class="brand"><span class="dot"></span>SECURE CHECK-IN</div>
       </div>
+    </div>
 
   </div>
 
 <script>
-  const GAS_URL = 'https://script.google.com/macros/s/AKfycbzNDDXHgrpaZd8LIgYF7zaCJMjlFOLfjYq-7qFxtuVsVZr5Kd1map29Y3qTkKLpA3z7/exec';
+  const GAS_URL = 'https://script.google.com/macros/s/AKfycbw7wPLL-AJHJrlnXsg9MgaS3mG5CD3ZoWoIj-tMMr0afF3j8hl4PgwCc5oBuvpJJf09/exec';
   let authToken = null;
   let scannerInstance = null;
   let authFailed = false;
@@ -374,6 +370,7 @@
   let lastScanTime = 0;
   const SCAN_COOLDOWN_MS = 2500; // 同一QRコードの連続誤検出を防ぐための間隔
 
+  // IDフィールド:全角英数字を自動的に半角に変換し、それ以外の文字は除去
   document.getElementById('login-id').addEventListener('input', function (e) {
     e.target.value = e.target.value
       .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
@@ -392,10 +389,12 @@
     document.getElementById('login-error').classList.add('hidden');
     authFailed = false;
 
+    // カメラをこのクリック操作の中で同期的に起動する（awaitを挟まない）
     document.getElementById('login-area').classList.add('hidden');
     document.getElementById('scan-area').classList.remove('hidden');
     startScanner();
 
+    // 認証は裏で並行して進める
     doLogin(id, pw);
   }
 
@@ -443,14 +442,14 @@
       {
         fps: 10,
         qrbox: 230,
-        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] // 画像ファイル読込は使用しない
       }
     );
     scannerInstance.render((decodedText) => {
       if (authFailed || isLookupInProgress) return;
 
       const now = Date.now();
-      // 同じQRコードを短時間に連続検出した場合は無視する（カメラに映り続けている間の誤検出防止）
+      // 同じQRコードを短時間に連続検出した場合は無視する（連続スキャンのための誤検出防止）
       if (decodedText === lastScannedId && (now - lastScanTime) < SCAN_COOLDOWN_MS) {
         return;
       }
@@ -458,7 +457,7 @@
       lastScanTime = now;
 
       lookupUser(decodedText);
-      // pause/resumeは行わない：カメラは止めず、次のQRコードを継続して検出する
+      // pause/resumeは行わない：カメラを止めず、連続で次のQRコードを検出し続ける
     });
   }
 
@@ -477,8 +476,9 @@
     if (!authToken) {
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('info').classList.remove('hidden');
-      document.getElementById('res-name').classList.remove('placeholder-row');
-      document.getElementById('res-name').innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
+      const nameEl = document.getElementById('res-name');
+      nameEl.classList.remove('placeholder-row');
+      nameEl.innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
       document.getElementById('res-dept').innerText = '';
       document.getElementById('res-badge').innerHTML = '';
       isLookupInProgress = false;
@@ -495,18 +495,19 @@
 
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('info').classList.remove('hidden');
-      document.getElementById('res-name').classList.remove('placeholder-row');
+      const nameEl = document.getElementById('res-name');
+      nameEl.classList.remove('placeholder-row');
 
       if (data.success) {
-        document.getElementById('res-name').innerText = data.name;
+        nameEl.innerText = data.name;
         document.getElementById('res-dept').innerText = data.dept;
 
         const badge = data.alreadyChecked
-          ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
-          : '<span class="badge badge-ok">✓ 新規照会</span>';
+          ? '<span class="badge badge-warn">⚠ 入場済み（再入場）</span>'
+          : '<span class="badge badge-ok">✓ 新規入場</span>';
         document.getElementById('res-badge').innerHTML = badge;
       } else {
-        document.getElementById('res-name').innerHTML = '<span class="res-error">' + data.message + '</span>';
+        nameEl.innerHTML = '<span class="res-error">' + data.message + '</span>';
         document.getElementById('res-dept').innerText = '';
         document.getElementById('res-badge').innerHTML = '';
         if (data.message.includes('認証エラー')) {
