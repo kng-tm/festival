@@ -14,7 +14,9 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <input id="login-id" type="text" placeholder="ID" class="w-full border rounded p-2 mb-2">
-      <input id="login-pw" type="password" placeholder="パスワード" class="w-full border rounded p-2 mb-2">
+      <input id="login-pw" type="password" placeholder="パスワード" 
+       class="w-full border rounded p-2 mb-2"
+       onkeydown="if(event.key==='Enter') onLoginClick()">
       <button onclick="onLoginClick()" class="w-full bg-blue-600 text-white font-bold py-2 rounded">
         ログインしてスキャン開始
       </button>
