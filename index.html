@@ -77,6 +77,7 @@
     line-height:1.5;
   }
 
+  /* ---- ログインフォーム ---- */
   .field{ margin-bottom: 14px; }
   .field label{
     display:block;
@@ -150,30 +151,49 @@
   }
   .hidden{ display:none !important; }
 
+  /* ---- スキャン画面全体の枠 ----
+     映像とボタン欄がここに縦積みされる。全体は白背景・角丸。 */
   .scan-frame{
     position: relative;
     width:100%;
-    aspect-ratio: 1 / 1;
     border-radius: 12px;
     overflow: hidden;
-    background: var(--surface); /* #10131A から変更 */
+    background: var(--surface);
     border: 1px solid var(--border);
   }
-  /* html5-qrcode標準の白い縁取りを、デザインに合わせて紺色に変更 */
-  #qr-shaded-region > div{
-    background-color: var(--accent) !important;
-  }
-  /* #readerの黒背景をやめて、白系の背景にする */
+
+  /* html5-qrcodeが生成する最外周div。白背景に統一し、正方形化はしない */
   #reader{
+    width:100% !important;
     background: var(--surface) !important;
   }
-  
-  /* カメラ映像(video)の部分だけ黒背景にする */
-  #reader__scan_region video{
+
+  /* 映像が映る領域だけを正方形にし、黒背景を残す */
+  #reader__scan_region{
+    aspect-ratio: 1 / 1 !important;
+    overflow: hidden !important;
+    position: relative !important;
     background: #10131A !important;
   }
-  #reader video{ object-fit: cover; }
-  #reader img{ display:none; }
+  #reader__scan_region video{
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover;
+  }
+  #reader img{ display:none; } /* ライブラリのInfoアイコンを非表示 */
+
+  /* スキャン範囲の白い縁取り(html5-qrcode標準)を、デザインのアクセント色に変更 */
+  div#qr-shaded-region > div{
+    background-color: var(--accent) !important;
+  }
+
+  /* 操作ボタン欄(Stop Scanningなど)。白背景に統一 */
+  #reader__dashboard{
+    background: var(--surface) !important;
+    padding: 14px 4px 4px !important;
+    color: var(--text-dim) !important;
+    font-family: 'Inter', sans-serif !important;
+  }
   #html5-qrcode-button-camera-stop,
   #html5-qrcode-button-camera-start{
     background: #FFFFFF !important;
@@ -186,12 +206,6 @@
     font-size: 14px !important;
     cursor: pointer !important;
   }
-  .scan-frame #reader__dashboard{
-    background: var(--surface) !important;
-    padding: 14px 0 4px !important;
-    color: var(--text-dim) !important;
-    font-family: 'Inter', sans-serif !important;
-  }
 
   .scan-caption{
     text-align:center;
@@ -201,6 +215,7 @@
     letter-spacing: 0.02em;
   }
 
+  /* ---- 結果表示 ---- */
   .result-box{
     margin-top: 20px;
     padding: 18px 18px 16px;
@@ -277,8 +292,8 @@
 
     <!-- ログイン画面 -->
     <div id="login-area">
-      <h1>QRコード情報紹介</h1>
-      <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
+      <h1>QRコード情報照会</h1>
+      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
