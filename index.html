@@ -509,6 +509,12 @@
   }
 
   async function doLogin(id, pw) {
+    if (!GAS_URL || !GAS_URL.startsWith('https://script.google.com/')) {
+      authFailed = true;
+      stopScannerAndReturnToLogin('システム設定エラー: GAS_URLが正しく設定されていません(管理者に連絡してください)');
+      return;
+    }
+
     try {
       const res = await fetch(GAS_URL, {
         method: 'POST',
