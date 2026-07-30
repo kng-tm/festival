@@ -349,6 +349,21 @@
     justify-content: center;
     margin-top: 14px;
   }
+
+  /* 画面幅が十分broadな場合(Chromebook等)は、カードを大きめに表示 */
+  @media (min-width: 700px) {
+    .card{
+      max-width: 480px;
+      padding: 36px 32px 34px;
+    }
+    #reader__scan_region{
+      max-width: 400px;
+      margin: 0 auto;
+    }
+    .res-name{
+      font-size: 28px;
+    }
+  }
 </style>
 </head>
 <body>
