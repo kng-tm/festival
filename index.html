@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>入場券QR照会</title>
+<title>QR情報照会</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -148,6 +148,11 @@
     background: var(--surface);
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .field-hint{
+    margin: 6px 2px 0;
+    font-size: 11.5px;
+    color: var(--text-dim);
   }
 
   .btn-primary{
@@ -313,6 +318,25 @@
     margin: 0;
   }
 
+  .lottery-banner{
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    text-align: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: #7A4E00;
+    background: linear-gradient(135deg, #FFE9A8, #FFD066);
+    border: 1px solid #F0B93A;
+    animation: lotteryPop 0.5s cubic-bezier(.36,1.56,.64,1);
+  }
+  @keyframes lotteryPop{
+    0%{ transform: scale(0.7); opacity: 0; }
+    60%{ transform: scale(1.08); opacity: 1; }
+    100%{ transform: scale(1); }
+  }
+
   .res-error{
     color: var(--danger);
     font-family: 'Inter', sans-serif;
@@ -349,21 +373,6 @@
     justify-content: center;
     margin-top: 14px;
   }
-
-  /* 画面幅が十分broadな場合(Chromebook等)は、カードを大きめに表示 */
-  @media (min-width: 700px) {
-    .card{
-      max-width: 480px;
-      padding: 36px 32px 34px;
-    }
-    #reader__scan_region{
-      max-width: 400px;
-      margin: 0 auto;
-    }
-    .res-name{
-      font-size: 28px;
-    }
-  }
 </style>
 </head>
 <body>
@@ -373,13 +382,14 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
-      <h1>入場券QRコード照会</h1>
-      <p class="subtitle">配布されたQR読み取り用アカウントでログインし、QRコードをスキャンしてください。</p>
+      <h1>QRコード情報照会</h1>
+      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
-        <input id="login-id" type="text" placeholder="user ID" autocomplete="username"
+        <input id="login-id" type="text" placeholder="employee ID" autocomplete="username" lang="en"
                inputmode="email" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <p class="field-hint">半角英数字で入力してください（日本語入力はオフにしてください）</p>
       </div>
       <div class="field">
         <label for="login-pw">パスワード</label>
@@ -410,6 +420,7 @@
           <div class="result-label"><span class="pulse"></span>照会結果</div>
           <p class="res-name placeholder-row" id="res-name">QRコードをスキャンしてください</p>
           <p class="res-dept" id="res-dept"></p>
+          <div id="lottery-banner" class="lottery-banner hidden">🎉 抽選対象です 🎉</div>
           <p id="res-badge"></p>
         </div>
       </div>
@@ -477,6 +488,14 @@
     playTone(180, 0.22, 'square', 0.14, 0.10);
   }
 
+  function playLotterySound() {
+    // 抽選対象向けの、華やかな上昇アルペジオ
+    playTone(659.3, 0.10, 'sine', 0,    0.16); // E5
+    playTone(783.9, 0.10, 'sine', 0.08, 0.16); // G5
+    playTone(987.8, 0.10, 'sine', 0.16, 0.16); // B5
+    playTone(1318.5, 0.22, 'sine', 0.24, 0.18); // E6
+  }
+
   function toggleMute() {
     isMuted = !isMuted;
     sessionStorage.setItem('qr_scanner_muted', String(isMuted));
@@ -492,10 +511,37 @@
   updateMuteButton(); // 初期表示に反映
 
   // IDフィールド:全角英数字を自動的に半角に変換し、それ以外の文字は除去
-  document.getElementById('login-id').addEventListener('input', function (e) {
-    e.target.value = e.target.value
+  // IME(日本語入力)の変換中に割り込むと候補選択が壊れるため、
+  // 確定タイミング(compositionend)でのみサニタイズを行う
+  const loginIdInput = document.getElementById('login-id');
+  let isComposing = false;
+
+  function sanitizeIdValue(el) {
+    const before = el.value;
+    const after = before
       .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
       .replace(/[^A-Za-z0-9]/g, '');
+    if (before !== after) {
+      el.value = after;
+    }
+  }
+
+  loginIdInput.addEventListener('compositionstart', function () {
+    isComposing = true; // IME入力中は何もしない(変換候補を壊さないため)
+  });
+
+  loginIdInput.addEventListener('compositionend', function (e) {
+    isComposing = false;
+    sanitizeIdValue(e.target); // 確定した瞬間にまとめて変換
+  });
+
+  loginIdInput.addEventListener('input', function (e) {
+    if (isComposing) return; // IME変換中は素通りさせる
+    sanitizeIdValue(e.target); // 直接入力・貼り付け等はこれまで通り即座に変換
+  });
+
+  loginIdInput.addEventListener('blur', function (e) {
+    sanitizeIdValue(e.target); // 念のため、フォーカスが外れた時にも最終チェック
   });
 
   function onLoginClick() {
@@ -504,6 +550,12 @@
 
     if (!id || !pw) {
       showLoginError('IDとパスワードを入力してください');
+      return;
+    }
+
+    // IME等の影響で全角文字や不正な文字が紛れ込んでいないか、最終確認する
+    if (!/^[A-Za-z0-9]+$/.test(id)) {
+      showLoginError('IDは半角英数字で入力してください（日本語入力がオンになっていないか確認してください）');
       return;
     }
 
@@ -614,6 +666,7 @@
       nameEl.innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
       document.getElementById('res-dept').innerText = '';
       document.getElementById('res-badge').innerHTML = '';
+      document.getElementById('lottery-banner').classList.add('hidden');
       playErrorSound();
       isLookupInProgress = false;
       return;
@@ -634,18 +687,30 @@
 
       if (data.success) {
         nameEl.innerText = data.name;
-        document.getElementById('res-dept').innerText = data.dept;
+        document.getElementById('res-dept').innerText = '人数: ' + data.count + '名';
 
         const badge = data.alreadyChecked
-          ? '<span class="badge badge-warn">⚠ 入場済み（再入場）</span>'
-          : '<span class="badge badge-ok">✓ 新規入場</span>';
+          ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
+          : '<span class="badge badge-ok">✓ 新規照会</span>';
         document.getElementById('res-badge').innerHTML = badge;
 
-        playSuccessSound();
+        const lotteryBanner = document.getElementById('lottery-banner');
+        if (data.isLottery) {
+          // 再生のたびにアニメーションが走るよう、一度クラスを外してから付け直す
+          lotteryBanner.classList.remove('hidden');
+          lotteryBanner.style.animation = 'none';
+          void lotteryBanner.offsetWidth; // 強制リフロー(アニメーション再トリガーのため)
+          lotteryBanner.style.animation = '';
+          playLotterySound();
+        } else {
+          lotteryBanner.classList.add('hidden');
+          playSuccessSound();
+        }
       } else {
         nameEl.innerHTML = '<span class="res-error">' + data.message + '</span>';
         document.getElementById('res-dept').innerText = '';
         document.getElementById('res-badge').innerHTML = '';
+        document.getElementById('lottery-banner').classList.add('hidden');
 
         playErrorSound();
 
