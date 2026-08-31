@@ -505,39 +505,55 @@
     const gain = audioCtx.createGain();
     osc.type = type || 'sine';
     osc.frequency.value = frequency;
-
+  
     const startTime = audioCtx.currentTime + (delay || 0);
     gain.gain.setValueAtTime(volume || 0.15, startTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-
+  
     osc.connect(gain);
-    gain.connect(audioCtx.destination);
+    gain.connect(audioCtx.masterCompressor || audioCtx.destination); // ここを変更
     osc.start(startTime);
     osc.stop(startTime + duration);
   }
 
+    function initAudio() {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+  
+        // 出力全体にリミッターをかけ、音割れを自動的に防ぐ
+        const compressor = audioCtx.createDynamicsCompressor();
+        compressor.threshold.value = -6;   // -6dBを超えたら圧縮開始
+        compressor.knee.value = 4;
+        compressor.ratio.value = 12;       // 強めに圧縮(音割れを確実に防ぐ)
+        compressor.attack.value = 0.003;
+        compressor.release.value = 0.25;
+        compressor.connect(audioCtx.destination);
+  
+        audioCtx.masterCompressor = compressor; // 後で参照できるよう保持
+      }
+    }
+  }
+
   function playSuccessSound() {
-    // 明るく上昇する2音のチャイム
-    playTone(880.0, 0.12, 'sine', 0, 0.16);
-    playTone(1318.5, 0.16, 'sine', 0.09, 0.16);
+    playTone(880.0, 0.12, 'sine', 0, 0.35);
+    playTone(1318.5, 0.16, 'sine', 0.09, 0.35);
   }
-
+  
   function playErrorSound() {
-    // 低めの2音のブザー
-    playTone(220, 0.16, 'square', 0, 0.10);
-    playTone(180, 0.22, 'square', 0.14, 0.10);
+    playTone(220, 0.16, 'square', 0, 0.32);
+    playTone(180, 0.22, 'square', 0.14, 0.32);
   }
-
+  
   function playLotterySound() {
-    // 抽選対象向けの、華やかな上昇アルペジオ＋きらめく高音の重ね鳴らし
-    const notes = [523.3, 659.3, 783.9, 987.8, 1318.5, 1567.98]; // C5,E5,G5,B5,E6,G6
+    const notes = [523.3, 659.3, 783.9, 987.8, 1318.5, 1567.98];
     notes.forEach((freq, i) => {
-      playTone(freq, 0.22, 'triangle', i * 0.07, 0.22);
+      playTone(freq, 0.22, 'triangle', i * 0.07, 0.30);
     });
-    // 最後にきらめく和音を重ねる
-    playTone(1568.0, 0.35, 'sine', 0.42, 0.14);
-    playTone(2093.0, 0.35, 'sine', 0.46, 0.12);
-    playTone(2637.0, 0.4, 'sine', 0.5, 0.10);
+    playTone(1568.0, 0.35, 'sine', 0.42, 0.22);
+    playTone(2093.0, 0.35, 'sine', 0.46, 0.20);
+    playTone(2637.0, 0.4, 'sine', 0.5, 0.18);
   }
 
   function toggleMute() {
