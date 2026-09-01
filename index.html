@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QR入場券照会</title>
+<title>QRコード入場券照会</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -414,7 +414,7 @@
     margin-top: 14px;
   }
 
-  /* ---- 氏名検索画面 ---- */
+  /* ---- 名前検索画面 ---- */
   .btn-secondary{
     width: 100%;
     margin-top: 16px;
@@ -517,7 +517,7 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
-      <h1>QR入場券照会</h1>
+      <h1>QRコード入場券照会</h1>
       <p class="subtitle">配布されたQR読み取り用アカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
@@ -567,17 +567,17 @@
       <div class="header-bottom">
         <h1>スキャン中</h1>
         <p class="subtitle">枠内にQRコードを収めてください。連続で読み取れます。</p>
-        <button class="btn-secondary" onclick="openSearchView()">名前で検索して入場処理</button>
+        <button class="btn-secondary" onclick="openSearchView()">名前で検索してチェックイン</button>
         <div class="brand"><span class="dot"></span>SECURE CHECK-IN</div>
       </div>
     </div>
 
-    <!-- 氏名検索画面 -->
+    <!-- 名前検索画面 -->
     <div id="search-area" class="hidden">
       <h1>名前で検索</h1>
       <p class="subtitle">QRコードが読み取れない場合に使用します。</p>
 
-      <input id="search-input" type="text" placeholder="氏名を入力..." autocomplete="off">
+      <input id="search-input" type="text" placeholder="名前を入力..." autocomplete="off">
       <p id="search-status">読み込み中...</p>
 
       <div id="search-results" class="result-list"></div>
@@ -595,7 +595,7 @@
   let isLookupInProgress = false;
   let lastScannedId = null;
   let lastScanTime = 0;
-  let searchIndexData = null; // 氏名検索用のインデックス(ログイン後に1回だけ取得)
+  let searchIndexData = null; // 名前検索用のインデックス(ログイン後に1回だけ取得)
   const SCAN_COOLDOWN_MS = 2500; // 同一QRコードの連続誤検出を防ぐための間隔
 
   // ---- 通知音（Web Audio APIでその場で合成。外部音源ファイルは一切使用しない） ----
@@ -802,7 +802,7 @@
     });
   }
 
-  /* ---- 氏名検索画面 ---- */
+  /* ---- 名前検索画面 ---- */
 
   function openSearchView() {
     document.getElementById('scan-area').classList.add('hidden');
@@ -872,17 +872,30 @@
       item.innerHTML =
         '<div>' +
           '<div class="r-name"></div>' +
-          '<div class="r-sub">' + p.count + '名' + (p.isLottery ? ' ・ 🎉抽選対象' : '') + '</div>' +
+          '<div class="r-sub"></div>' +
         '</div>' +
         '<span class="chip ' + (p.checked ? 'chip-checked' : 'chip-unchecked') + '">' +
           (p.checked ? '照会済み' : '未照会') +
         '</span>';
-      // 氏名はtextContentで入れることでHTMLとして解釈されないようにする
+      // 名前・メールはtextContentで入れることでHTMLとして解釈されないようにする
       item.querySelector('.r-name').textContent = p.name;
+      item.querySelector('.r-sub').textContent =
+        p.count + '名 ・ ' + maskEmail(p.email) + (p.isLottery ? ' ・ 🎉抽選対象' : '');
 
       item.addEventListener('click', function () { checkInFromSearch(p); });
       listEl.appendChild(item);
     });
+  }
+
+  /**
+   * 同姓同名の判別に必要な最小限だけを見せる。
+   * 例: tanaka.taro@example.com → ta***@example.com
+   */
+  function maskEmail(email) {
+    if (!email) return 'メール未登録';
+    const parts = String(email).split('@');
+    if (parts.length !== 2) return '***';
+    return parts[0].slice(0, 2) + '***@' + parts[1];
   }
 
   function checkInFromSearch(person) {
