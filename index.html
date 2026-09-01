@@ -567,7 +567,7 @@
       <div class="header-bottom">
         <h1>スキャン中</h1>
         <p class="subtitle">枠内にQRコードを収めてください。連続で読み取れます。</p>
-        <button class="btn-secondary" onclick="openSearchView()">名前で検索してチェックイン</button>
+        <button class="btn-secondary" onclick="openSearchView()">名前で検索して入場処理</button>
         <div class="brand"><span class="dot"></span>SECURE CHECK-IN</div>
       </div>
     </div>
@@ -875,12 +875,12 @@
           '<div class="r-sub"></div>' +
         '</div>' +
         '<span class="chip ' + (p.checked ? 'chip-checked' : 'chip-unchecked') + '">' +
-          (p.checked ? '照会済み' : '未照会') +
+          (p.checked ? '入場済み' : '未入場') +
         '</span>';
       // 名前・メールはtextContentで入れることでHTMLとして解釈されないようにする
       item.querySelector('.r-name').textContent = p.name;
       item.querySelector('.r-sub').textContent =
-        p.count + '名 ・ ' + maskEmail(p.email) + (p.isLottery ? ' ・ 🎉抽選対象' : '');
+        p.count + '名 ・ ' + maskEmail(p.email);
 
       item.addEventListener('click', function () { checkInFromSearch(p); });
       listEl.appendChild(item);
@@ -952,8 +952,8 @@
         document.getElementById('res-dept').innerText = '人数: ' + data.count + '名';
 
         const badge = data.alreadyChecked
-          ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
-          : '<span class="badge badge-ok">✓ 新規照会</span>';
+          ? '<span class="badge badge-warn">⚠ 入場済み（再スキャン）</span>'
+          : '<span class="badge badge-ok">✓ 新規入場</span>';
         document.getElementById('res-badge').innerHTML = badge;
 
         const lotteryBanner = document.getElementById('lottery-banner');
