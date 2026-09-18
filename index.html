@@ -856,8 +856,13 @@
       "reader",
       {
         fps: 10,
-        qrbox: 230,
-        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] // 画像ファイル読込は使用しない
+        qrbox: function (viewfinderWidth, viewfinderHeight) {
+          // 映像の短辺の70%を一辺とする正方形を解析範囲にする
+          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+          const size = Math.floor(minEdge * 0.7);
+          return { width: size, height: size };
+        },
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
       }
     );
     scannerInstance.render((decodedText) => {
