@@ -629,6 +629,44 @@
   let searchIndexData = null; // 名前検索用のインデックス(ログイン後に1回だけ取得)
   const SCAN_COOLDOWN_MS = 2500; // 同一QRコードの連続誤検出を防ぐための間隔
 
+  /* ---- 通信処理（失敗時に自動で再試行する） ---- */
+  const FETCH_MAX_RETRIES = 2;   // 初回を含めて最大3回試行する
+  const FETCH_RETRY_WAIT_MS = 700; // 再試行までの待ち時間（回数に応じて伸ばす）
+
+  /**
+   * GASへのPOST通信。
+   * 通信自体が失敗した場合のみ、間隔をあけて自動的に再送する。
+   * サーバーが正常に応答していれば（内容がエラーでも）再送はしない。
+   *
+   * onRetry: 再試行に入ったときに呼ばれる。画面表示の更新に使う。
+   */
+  async function postToGas(payload, onRetry) {
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= FETCH_MAX_RETRIES; attempt++) {
+      try {
+        const res = await fetch(GAS_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify(payload)
+        });
+        return await res.json();
+
+      } catch (err) {
+        lastError = err;
+        console.error('[通信失敗 ' + (attempt + 1) + '回目]', err.name, err.message);
+
+        if (attempt < FETCH_MAX_RETRIES) {
+          if (onRetry) onRetry(attempt + 1);
+          // 少し待ってから再試行する（瞬間的な不調を吸収するため）
+          await new Promise(r => setTimeout(r, FETCH_RETRY_WAIT_MS * (attempt + 1)));
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
   // ---- 通知音（Web Audio APIでその場で合成。外部音源ファイルは一切使用しない） ----
   let audioCtx = null;
   let isMuted = sessionStorage.getItem('qr_scanner_muted') === 'true';
@@ -768,12 +806,7 @@
     }
 
     try {
-      const res = await fetch(GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'login', id: id, password: pw })
-      });
-      const data = await res.json();
+      const data = await postToGas({ action: 'login', id: id, password: pw });
 
       if (data.success) {
         authToken = data.token;
@@ -902,18 +935,13 @@
     }
 
     try {
-      const res = await fetch(GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          action: 'setupAccount',
-          token: authToken,
-          newName: newName,
-          newId: newId,
-          newPassword: pw1
-        })
+      const data = await postToGas({
+        action: 'setupAccount',
+        token: authToken,
+        newName: newName,
+        newId: newId,
+        newPassword: pw1
       });
-      const data = await res.json();
 
       if (data.success) {
         // 設定完了。仮IDと初期パスワードは無効になったので、ログイン画面に戻す
@@ -959,12 +987,12 @@
     statusEl.textContent = '読み込み中...';
 
     try {
-      const res = await fetch(GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'searchIndex', token: authToken })
-      });
-      const data = await res.json();
+      const data = await postToGas(
+        { action: 'searchIndex', token: authToken },
+        function (retryCount) {
+          statusEl.textContent = '接続が不安定です。再試行中... (' + retryCount + '/' + FETCH_MAX_RETRIES + ')';
+        }
+      );
 
       if (data.success) {
         searchIndexData = data.list;
@@ -1065,12 +1093,18 @@
     }
 
     try {
-      const res = await fetch(GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'lookup', token: authToken, qrId: qrId })
-      });
-      const data = await res.json();
+      const loadingEl = document.getElementById('loading');
+
+      const data = await postToGas(
+        { action: 'lookup', token: authToken, qrId: qrId },
+        function (retryCount) {
+          loadingEl.innerHTML =
+            '<span class="spinner"></span> 接続が不安定です。再試行中... (' + retryCount + '/' + FETCH_MAX_RETRIES + ')';
+        }
+      );
+
+      // 再試行の表示を元に戻す
+      loadingEl.innerHTML = '<span class="spinner"></span> 照会中...';
 
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('info').classList.remove('hidden');
@@ -1115,6 +1149,9 @@
     } catch (err) {
       // 切り分け用：実際のエラー内容をコンソールに出す
       console.error('[照会通信失敗]', err.name, err.message, err);
+
+      // 再試行の表示を元に戻しておく
+      document.getElementById('loading').innerHTML = '<span class="spinner"></span> 照会中...';
 
       // catchが無いと「照会中...」のまま固まってしまうため、エラーを表示する
       document.getElementById('loading').classList.add('hidden');
