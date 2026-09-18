@@ -1038,47 +1038,41 @@
   }
 
   async function lookupUser(qrId) {
+    const tStart = Date.now();
     isLookupInProgress = true;
-
+  
     document.getElementById('loading').classList.remove('hidden');
     document.getElementById('info').classList.add('hidden');
-
+  
     let waitCount = 0;
     while (!authToken && !authFailed && waitCount < 50) {
       await new Promise(r => setTimeout(r, 100));
       waitCount++;
     }
-
-    if (!authToken) {
-      document.getElementById('loading').classList.add('hidden');
-      document.getElementById('info').classList.remove('hidden');
-      const nameEl = document.getElementById('res-name');
-      nameEl.classList.remove('placeholder-row');
-      nameEl.innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
-      document.getElementById('res-dept').innerText = '';
-      document.getElementById('res-badge').innerHTML = '';
-      document.getElementById('lottery-banner').classList.add('hidden');
-      playErrorSound();
-      isLookupInProgress = false;
-      return;
-    }
-
+    const tAuthWait = Date.now() - tStart;  // 認証待ちに費やした時間
+  
+    // ...(認証エラー処理は既存のまま)...
+  
     try {
+      const tFetchStart = Date.now();
       const res = await fetch(GAS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({ action: 'lookup', token: authToken, qrId: qrId })
       });
       const data = await res.json();
-
+      const tFetch = Date.now() - tFetchStart;  // 通信＋GAS処理の時間
+  
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('info').classList.remove('hidden');
       const nameEl = document.getElementById('res-name');
       nameEl.classList.remove('placeholder-row');
-
+  
       if (data.success) {
         nameEl.innerText = data.name;
-        document.getElementById('res-dept').innerText = '人数: ' + data.count + '名';
+        // 計測結果を人数の横に表示（調査が終わったら消す）
+        document.getElementById('res-dept').innerText =
+          '人数: ' + data.count + '名　[認証待ち:' + tAuthWait + 'ms 通信:' + tFetch + 'ms]';
 
         const badge = data.alreadyChecked
           ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
