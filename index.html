@@ -518,22 +518,53 @@
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
       <h1>QRコード入場券照会</h1>
-      <p class="subtitle">配布されたQR読み取り用アカウントでログインし、QRコードをスキャンしてください。</p>
+      <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
-        <input id="login-id" type="text" placeholder="employee ID" autocomplete="username" lang="en"
+        <input id="login-id" type="text" placeholder="user ID" autocomplete="username" lang="en"
                inputmode="email" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
         <p class="field-hint">半角英数字で入力してください（日本語入力はオフにしてください）</p>
       </div>
       <div class="field">
         <label for="login-pw">パスワード</label>
         <input id="login-pw" type="password" placeholder="••••••••" autocomplete="current-password"
+               inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false"
                onkeydown="if(event.key==='Enter') onLoginClick()">
       </div>
 
       <button class="btn-primary" onclick="onLoginClick()">ログインしてスキャン開始</button>
       <div id="login-error" class="error-msg hidden"></div>
+    </div>
+
+    <!-- 仮アカウントの初回設定画面 -->
+    <div id="setup-area" class="hidden">
+      <h1>アカウントの設定</h1>
+      <p class="subtitle">初回ログインのため、ご自身の情報を設定してください。設定後、仮IDと初期パスワードは使用できなくなります。</p>
+
+      <div class="field">
+        <label for="setup-name">名前</label>
+        <input id="setup-name" type="text" placeholder="受付スタッフの氏名" autocomplete="name">
+      </div>
+      <div class="field">
+        <label for="setup-id">新しいID</label>
+        <input id="setup-id" type="text" placeholder="半角英数字4文字以上" autocomplete="off"
+               inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="setup-pw">新しいパスワード</label>
+        <input id="setup-pw" type="password" placeholder="半角英数字8文字以上" autocomplete="new-password"
+               inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="setup-pw2">パスワード（確認）</label>
+        <input id="setup-pw2" type="password" placeholder="もう一度入力" autocomplete="new-password"
+               inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false"
+               onkeydown="if(event.key==='Enter') onSetupSubmit()">
+      </div>
+
+      <button class="btn-primary" onclick="onSetupSubmit()">設定する</button>
+      <div id="setup-error" class="error-msg hidden"></div>
     </div>
 
     <!-- スキャン画面：照会結果を最上部に固定表示、タイトル・ブランドは下部 -->
@@ -747,6 +778,13 @@
       if (data.success) {
         authToken = data.token;
         sessionStorage.setItem('auth_token', authToken);
+
+        if (data.isProvisional) {
+          // 仮アカウントの場合はスキャン画面に進ませず、設定画面へ強制遷移する
+          goToSetupView();
+          return;
+        }
+
         document.getElementById('auth-overlay').classList.add('hidden'); // 認証完了、カメラ画面を表示
       } else {
         authFailed = true;
@@ -764,6 +802,7 @@
       scannerInstance = null;
     }
     searchIndexData = null; // セッションが変わるため検索データを破棄
+    document.getElementById('setup-area').classList.add('hidden');
     document.getElementById('search-area').classList.add('hidden');
     document.getElementById('auth-overlay').classList.add('hidden'); // 次回のためにリセット
     document.getElementById('scan-area').classList.add('hidden');
@@ -800,6 +839,95 @@
       lookupUser(decodedText);
       // pause/resumeは行わない：カメラを止めず、連続で次のQRコードを検出し続ける
     });
+  }
+
+  /* ---- 仮アカウントの初回設定 ---- */
+
+  function goToSetupView() {
+    // 起動済みのカメラを止めてから設定画面へ切り替える
+    if (scannerInstance) {
+      scannerInstance.clear().catch(() => {});
+      scannerInstance = null;
+    }
+    document.getElementById('auth-overlay').classList.add('hidden');
+    document.getElementById('scan-area').classList.add('hidden');
+    document.getElementById('login-area').classList.add('hidden');
+    document.getElementById('setup-error').classList.add('hidden');
+    document.getElementById('setup-name').value = '';
+    document.getElementById('setup-id').value = '';
+    document.getElementById('setup-pw').value = '';
+    document.getElementById('setup-pw2').value = '';
+    document.getElementById('setup-area').classList.remove('hidden');
+  }
+
+  function showSetupError(message) {
+    const el = document.getElementById('setup-error');
+    el.textContent = message;
+    el.classList.remove('hidden');
+  }
+
+  async function onSetupSubmit() {
+    const newName = document.getElementById('setup-name').value.trim();
+    const newId = document.getElementById('setup-id').value.trim();
+    const pw1 = document.getElementById('setup-pw').value;
+    const pw2 = document.getElementById('setup-pw2').value;
+
+    document.getElementById('setup-error').classList.add('hidden');
+
+    if (!newName) {
+      showSetupError('名前を入力してください');
+      return;
+    }
+    if (!/^[A-Za-z0-9]+$/.test(newId)) {
+      showSetupError('IDは半角英数字のみで入力してください');
+      return;
+    }
+    if (newId.length < 4) {
+      showSetupError('IDは4文字以上にしてください');
+      return;
+    }
+    if (!/^[A-Za-z0-9]+$/.test(pw1)) {
+      showSetupError('パスワードは半角英数字のみで入力してください（日本語入力がオンになっていないか確認してください）');
+      return;
+    }
+    if (pw1.length < 8) {
+      showSetupError('パスワードは8文字以上にしてください');
+      return;
+    }
+    if (pw1 !== pw2) {
+      showSetupError('パスワードが一致しません');
+      return;
+    }
+
+    try {
+      const res = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({
+          action: 'setupAccount',
+          token: authToken,
+          newName: newName,
+          newId: newId,
+          newPassword: pw1
+        })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        // 設定完了。仮IDと初期パスワードは無効になったので、ログイン画面に戻す
+        authToken = null;
+        sessionStorage.removeItem('auth_token');
+        document.getElementById('setup-area').classList.add('hidden');
+        document.getElementById('login-area').classList.remove('hidden');
+        document.getElementById('login-id').value = newId; // 入力の手間を省く
+        document.getElementById('login-pw').value = '';
+        showLoginError('設定が完了しました。新しいIDとパスワードでログインしてください');
+      } else {
+        showSetupError(data.message);
+      }
+    } catch (err) {
+      showSetupError('通信エラーが発生しました');
+    }
   }
 
   /* ---- 名前検索画面 ---- */
@@ -875,12 +1003,12 @@
           '<div class="r-sub"></div>' +
         '</div>' +
         '<span class="chip ' + (p.checked ? 'chip-checked' : 'chip-unchecked') + '">' +
-          (p.checked ? '入場済み' : '未入場') +
+          (p.checked ? '照会済み' : '未照会') +
         '</span>';
       // 名前・メールはtextContentで入れることでHTMLとして解釈されないようにする
       item.querySelector('.r-name').textContent = p.name;
       item.querySelector('.r-sub').textContent =
-        p.count + '名 ・ ' + maskEmail(p.email);
+        p.count + '名 ・ ' + maskEmail(p.email) + (p.isLottery ? ' ・ 🎉抽選対象' : '');
 
       item.addEventListener('click', function () { checkInFromSearch(p); });
       listEl.appendChild(item);
@@ -952,8 +1080,8 @@
         document.getElementById('res-dept').innerText = '人数: ' + data.count + '名';
 
         const badge = data.alreadyChecked
-          ? '<span class="badge badge-warn">⚠ 入場済み（再スキャン）</span>'
-          : '<span class="badge badge-ok">✓ 新規入場</span>';
+          ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
+          : '<span class="badge badge-ok">✓ 新規照会</span>';
         document.getElementById('res-badge').innerHTML = badge;
 
         const lotteryBanner = document.getElementById('lottery-banner');
