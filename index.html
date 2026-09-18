@@ -773,7 +773,18 @@
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({ action: 'login', id: id, password: pw })
       });
+      
       const data = await res.json();
+      
+      if (data.retryable) {
+        // リダイレクトで中断されたので、もう一度送り直す
+        const res2 = await fetch(GAS_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ action: 'lookup', token: authToken, qrId: qrId })
+        });
+        data = await res2.json();
+      }
 
       if (data.success) {
         authToken = data.token;
