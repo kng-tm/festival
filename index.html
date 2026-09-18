@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QRコード入場券照会</title>
+<title>QR入場券照会</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -773,6 +773,7 @@
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({ action: 'login', id: id, password: pw })
       });
+      const data = await res.json();
 
       if (data.success) {
         authToken = data.token;
@@ -790,6 +791,8 @@
         stopScannerAndReturnToLogin(data.message);
       }
     } catch (err) {
+      // 切り分け用：実際のエラー内容をコンソールに出す
+      console.error('[ログイン通信失敗]', err.name, err.message, err);
       authFailed = true;
       stopScannerAndReturnToLogin('通信エラーが発生しました');
     }
@@ -825,8 +828,7 @@
       }
     );
     scannerInstance.render((decodedText) => {
-        if (authFailed || isLookupInProgress) return;
-        if (!authToken) return;  // 認証完了前は検出を無視する
+      if (authFailed || isLookupInProgress) return;
 
       const now = Date.now();
       // 同じQRコードを短時間に連続検出した場合は無視する（連続スキャンのための誤検出防止）
@@ -1037,41 +1039,47 @@
   }
 
   async function lookupUser(qrId) {
-    const tStart = Date.now();
     isLookupInProgress = true;
-  
+
     document.getElementById('loading').classList.remove('hidden');
     document.getElementById('info').classList.add('hidden');
-  
+
     let waitCount = 0;
     while (!authToken && !authFailed && waitCount < 50) {
       await new Promise(r => setTimeout(r, 100));
       waitCount++;
     }
-    const tAuthWait = Date.now() - tStart;  // 認証待ちに費やした時間
-  
-    // ...(認証エラー処理は既存のまま)...
-  
+
+    if (!authToken) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('info').classList.remove('hidden');
+      const nameEl = document.getElementById('res-name');
+      nameEl.classList.remove('placeholder-row');
+      nameEl.innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
+      document.getElementById('res-dept').innerText = '';
+      document.getElementById('res-badge').innerHTML = '';
+      document.getElementById('lottery-banner').classList.add('hidden');
+      playErrorSound();
+      isLookupInProgress = false;
+      return;
+    }
+
     try {
-      const tFetchStart = Date.now();
       const res = await fetch(GAS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({ action: 'lookup', token: authToken, qrId: qrId })
       });
       const data = await res.json();
-      const tFetch = Date.now() - tFetchStart;  // 通信＋GAS処理の時間
-  
+
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('info').classList.remove('hidden');
       const nameEl = document.getElementById('res-name');
       nameEl.classList.remove('placeholder-row');
-  
+
       if (data.success) {
         nameEl.innerText = data.name;
-        // 計測結果を人数の横に表示（調査が終わったら消す）
-        document.getElementById('res-dept').innerText =
-          '人数: ' + data.count + '名　[認証待ち:' + tAuthWait + 'ms 通信:' + tFetch + 'ms]';
+        document.getElementById('res-dept').innerText = '人数: ' + data.count + '名';
 
         const badge = data.alreadyChecked
           ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
