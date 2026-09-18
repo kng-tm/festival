@@ -856,10 +856,9 @@
       "reader",
       {
         fps: 10,
-        qrbox: function (viewfinderWidth, viewfinderHeight) {
-          // 映像の短辺の70%を一辺とする正方形を解析範囲にする
-          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-          const size = Math.floor(minEdge * 0.7);
+        aspectRatio: 1.0,   // 映像を1:1で取得する
+        qrbox: function (w, h) {
+          const size = Math.floor(Math.min(w, h) * 0.7);
           return { width: size, height: size };
         },
         supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
