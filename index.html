@@ -826,7 +826,8 @@
       }
     );
     scannerInstance.render((decodedText) => {
-      if (authFailed || isLookupInProgress) return;
+        if (authFailed || isLookupInProgress) return;
+        if (!authToken) return;  // 認証完了前は検出を無視する
 
       const now = Date.now();
       // 同じQRコードを短時間に連続検出した場合は無視する（連続スキャンのための誤検出防止）
