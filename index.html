@@ -414,23 +414,36 @@
     margin-top: 14px;
   }
 
-  /* 未送信の有無だけを控えめに知らせる。件数までは出さない */
-  .pending-indicator{
+  /* 未送信があるときだけ出る小さな送信ボタン。件数までは出さない */
+  .pending-btn{
     display: inline-flex;
     align-items: center;
     gap: 5px;
     margin-left: 10px;
+    padding: 3px 9px;
+    border: 1px solid rgba(217,162,27,0.55);
+    border-radius: 999px;
+    background: rgba(217,162,27,0.12);
+    color: #8A6512;
+    font-family: inherit;
     font-size: 11px;
+    font-weight: 600;
     letter-spacing: 0;
     text-transform: none;
-    color: #8A6512;
+    cursor: pointer;
+    transition: background .12s ease;
   }
-  .pending-indicator::before{
+  .pending-btn::before{
     content: "";
     width: 5px;
     height: 5px;
     border-radius: 50%;
     background: #D9A21B;
+  }
+  .pending-btn:hover{ background: rgba(217,162,27,0.22); }
+  .pending-btn:disabled{
+    opacity: 0.65;
+    cursor: default;
   }
 
   /* ---- 名前検索画面 ---- */
@@ -543,7 +556,7 @@
         <label for="login-id">ID</label>
         <input id="login-id" type="text" placeholder="user ID" autocomplete="username" lang="en"
                inputmode="email" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <p class="field-hint">半角英数字で入力してください（日本語入力はオフにしてください）</p>
+        <p class="field-hint">半角英数字で入力してください</p>
       </div>
       <div class="field">
         <label for="login-pw">パスワード</label>
@@ -621,7 +634,7 @@
         <button class="btn-secondary" onclick="reloadRoster()">名簿を再取得</button>
         <div class="brand">
           <span class="dot"></span>SECURE CHECK-IN
-          <span id="pending-indicator" class="pending-indicator hidden">未送信あり</span>
+          <button id="pending-flush" class="pending-btn hidden" onclick="manualFlush()" type="button">未送信あり · 送信</button>
         </div>
       </div>
     </div>
@@ -750,10 +763,42 @@
     }
   }
 
+  const PENDING_BTN_LABEL = '未送信あり · 送信';
+
   function updatePendingIndicator() {
-    const el = document.getElementById('pending-indicator');
+    const el = document.getElementById('pending-flush');
     if (!el) return;
+
     el.classList.toggle('hidden', pendingCheckIns.length === 0);
+
+    // 送信中は「送信中...」などの表示を出しているので、ここでは上書きしない
+    if (!isFlushingQueue) {
+      el.disabled = false;
+      el.textContent = PENDING_BTN_LABEL;
+    }
+  }
+
+  /**
+   * 未送信分をその場で送る。
+   * 自動送信を待たずに片付けたいときのための手動操作。
+   */
+  async function manualFlush() {
+    const el = document.getElementById('pending-flush');
+    if (!el || isFlushingQueue || !pendingCheckIns.length) return;
+
+    el.disabled = true;
+    el.textContent = '送信中...';
+
+    const before = pendingCheckIns.length;
+    await flushCheckInQueue();
+
+    if (pendingCheckIns.length >= before) {
+      // 送れずにキューへ戻った
+      el.textContent = '送信できません';
+      setTimeout(updatePendingIndicator, 1800);
+    } else {
+      updatePendingIndicator();
+    }
   }
 
   function enqueueCheckIn(id) {
