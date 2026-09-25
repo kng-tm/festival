@@ -414,6 +414,25 @@
     margin-top: 14px;
   }
 
+  /* 未送信の有無だけを控えめに知らせる。件数までは出さない */
+  .pending-indicator{
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 10px;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: #8A6512;
+  }
+  .pending-indicator::before{
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #D9A21B;
+  }
+
   /* ---- 名前検索画面 ---- */
   .btn-secondary{
     width: 100%;
@@ -524,7 +543,7 @@
         <label for="login-id">ID</label>
         <input id="login-id" type="text" placeholder="user ID" autocomplete="username" lang="en"
                inputmode="email" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <p class="field-hint">半角英数字で入力してください（日本語入力はオフにしてください）</p>
+        <p class="field-hint">半角英数字で入力してください</p>
       </div>
       <div class="field">
         <label for="login-pw">パスワード</label>
@@ -573,7 +592,7 @@
       <!-- 認証が完了するまで、この上に重なってカメラ映像・結果を隠す -->
       <div id="auth-overlay" class="auth-overlay hidden">
         <span class="spinner-lg"></span>
-        <p>認証しています…</p>
+        <p id="auth-overlay-message">認証しています…</p>
       </div>
 
       <button id="mute-toggle" class="mute-btn" onclick="toggleMute()" aria-label="音声のオン・オフを切り替え" type="button">🔊</button>
@@ -599,7 +618,11 @@
         <h1>スキャン中</h1>
         <p class="subtitle">枠内にQRコードを収めてください。連続で読み取れます。</p>
         <button class="btn-secondary" onclick="openSearchView()">名前で検索して入場処理</button>
-        <div class="brand"><span class="dot"></span>SECURE CHECK-IN</div>
+        <button class="btn-secondary" onclick="reloadRoster()">名簿を再取得</button>
+        <div class="brand">
+          <span class="dot"></span>SECURE CHECK-IN
+          <span id="pending-indicator" class="pending-indicator hidden">未送信あり</span>
+        </div>
       </div>
     </div>
 
@@ -626,16 +649,17 @@
   let isLookupInProgress = false;
   let lastScannedId = null;
   let lastScanTime = 0;
-  let searchIndexData = null; // 名前検索用のインデックス(ログイン後に1回だけ取得)
+  let rosterData = null; // 名簿。ログイン時に1回だけ取得し、照会も名前検索もこれで完結させる
   const SCAN_COOLDOWN_MS = 2500; // 同一QRコードの連続誤検出を防ぐための間隔
 
-  /* ---- 通信処理（失敗時に自動で再試行する） ---- */
-  const FETCH_MAX_RETRIES = 2;   // 初回を含めて最大3回試行する
+  /* ---- 通信処理（タイムアウトと自動再試行） ---- */
+  const FETCH_MAX_RETRIES = 2;     // 初回を含めて最大3回試行する
   const FETCH_RETRY_WAIT_MS = 700; // 再試行までの待ち時間（回数に応じて伸ばす）
+  const FETCH_TIMEOUT_MS = 10000;  // 1回あたりの上限。通常の照会は1秒前後なので十分な余裕がある
 
   /**
    * GASへのPOST通信。
-   * 通信自体が失敗した場合のみ、間隔をあけて自動的に再送する。
+   * 指定時間を過ぎても応答がなければ打ち切り、間隔をあけて自動的に再送する。
    * サーバーが正常に応答していれば（内容がエラーでも）再送はしない。
    *
    * onRetry: 再試行に入ったときに呼ばれる。画面表示の更新に使う。
@@ -644,17 +668,25 @@
     let lastError = null;
 
     for (let attempt = 0; attempt <= FETCH_MAX_RETRIES; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
       try {
         const res = await fetch(GAS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: controller.signal
         });
+        clearTimeout(timer);
         return await res.json();
 
       } catch (err) {
+        clearTimeout(timer);
         lastError = err;
-        console.error('[通信失敗 ' + (attempt + 1) + '回目]', err.name, err.message);
+        // AbortErrorはタイムアウトによる打ち切りを意味する
+        const reason = (err.name === 'AbortError') ? 'タイムアウト' : err.message;
+        console.error('[通信失敗 ' + (attempt + 1) + '回目]', err.name, reason);
 
         if (attempt < FETCH_MAX_RETRIES) {
           if (onRetry) onRetry(attempt + 1);
@@ -666,6 +698,127 @@
 
     throw lastError;
   }
+
+  /* ==========================================================
+   * チェックインの送信キュー
+   * ==========================================================
+   * 照会そのものは端末内の名簿で完結させ、
+   * 「誰をチェックインしたか」だけをここに溜めて、
+   * 一定件数または一定時間ごとにまとめて送信する。
+   * これによりサーバーへのリクエスト数を大幅に減らしている。
+   * ========================================================== */
+  const QUEUE_FLUSH_SIZE = 10;            // この件数に達したら送信する
+  const QUEUE_FLUSH_INTERVAL_MS = 120000; // 溜まったままでも、この間隔で必ず送信する（2分）
+  const QUEUE_STORAGE_KEY = 'qr_pending_checkins';
+
+  let pendingCheckIns = [];   // 未送信のID
+  let isFlushingQueue = false;
+  let flushTimer = null;
+
+  function loadPendingFromStorage() {
+    try {
+      const saved = localStorage.getItem(QUEUE_STORAGE_KEY);
+      if (!saved) return;
+
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return;
+
+      // 今キューにある分を上書きしないよう、重複を避けて結合する
+      parsed.forEach(function (id) {
+        if (pendingCheckIns.indexOf(id) === -1) pendingCheckIns.push(id);
+      });
+    } catch (e) {
+      // 壊れた内容が残っていても動作は継続させる
+    }
+  }
+
+  function savePendingToStorage() {
+    try {
+      if (pendingCheckIns.length) {
+        localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(pendingCheckIns));
+      } else {
+        localStorage.removeItem(QUEUE_STORAGE_KEY);
+      }
+    } catch (e) {
+      // 保存できなくても動作自体は継続させる
+    }
+  }
+
+  function updatePendingIndicator() {
+    const el = document.getElementById('pending-indicator');
+    if (!el) return;
+    el.classList.toggle('hidden', pendingCheckIns.length === 0);
+  }
+
+  function enqueueCheckIn(id) {
+    pendingCheckIns.push(String(id));
+    savePendingToStorage();
+    updatePendingIndicator();
+
+    if (pendingCheckIns.length >= QUEUE_FLUSH_SIZE) {
+      flushCheckInQueue();
+    }
+  }
+
+  /**
+   * 溜まったチェックインをまとめて送信する。
+   * 送信に失敗した場合はキューに戻し、次の機会に再送する。
+   */
+  async function flushCheckInQueue() {
+    if (isFlushingQueue || !pendingCheckIns.length || !authToken) return;
+
+    isFlushingQueue = true;
+    // 送信中に新たなスキャンがあってもよいよう、対象を切り出しておく
+    const sending = pendingCheckIns.slice();
+    pendingCheckIns = [];
+    savePendingToStorage();
+    updatePendingIndicator();
+
+    try {
+      const data = await postToGas({ action: 'bulkCheckIn', token: authToken, ids: sending });
+
+      if (!data.success) {
+        // サーバー側で拒否された場合も、記録を失わないようキューに戻す
+        pendingCheckIns = sending.concat(pendingCheckIns);
+        console.error('[チェックイン記録失敗]', data.message);
+      }
+    } catch (err) {
+      pendingCheckIns = sending.concat(pendingCheckIns);
+      console.error('[チェックイン送信失敗]', err.name, err.message);
+    } finally {
+      savePendingToStorage();
+      updatePendingIndicator();
+      isFlushingQueue = false;
+    }
+  }
+
+  function startQueueTimer() {
+    if (flushTimer) clearInterval(flushTimer);
+    flushTimer = setInterval(flushCheckInQueue, QUEUE_FLUSH_INTERVAL_MS);
+  }
+
+  // 画面を閉じる・別アプリに切り替える直前に、溜まっている分を送っておく
+  window.addEventListener('pagehide', function () {
+    if (pendingCheckIns.length && authToken && navigator.sendBeacon) {
+      try {
+        navigator.sendBeacon(
+          GAS_URL,
+          new Blob(
+            [JSON.stringify({ action: 'bulkCheckIn', token: authToken, ids: pendingCheckIns })],
+            { type: 'text/plain' }
+          )
+        );
+        // 送信できたと確定はできないため、キューはあえて消さない。
+        // 重複して届いても、サーバー側は同じ行をTRUEにするだけなので害はない。
+      } catch (e) {
+        // 送信できなくても、localStorageに残っているので次回起動時に再送される
+      }
+    }
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) flushCheckInQueue();
+  });
 
   // ---- 通知音（Web Audio APIでその場で合成。外部音源ファイルは一切使用しない） ----
   let audioCtx = null;
@@ -818,7 +971,24 @@
           return;
         }
 
-        document.getElementById('auth-overlay').classList.add('hidden'); // 認証完了、カメラ画面を表示
+        // 照会は端末内の名簿で行うため、名簿が揃うまでスキャン画面は見せない
+        const msgEl = document.getElementById('auth-overlay-message');
+        const ok = await loadRoster(function (text) { msgEl.textContent = text; });
+
+        if (!ok) {
+          authFailed = true;
+          stopScannerAndReturnToLogin('名簿を取得できませんでした。もう一度お試しください');
+          return;
+        }
+
+        // 前回の端末終了時に送りきれなかった分があれば、ここで送る
+        loadPendingFromStorage();
+        updatePendingIndicator();
+        startQueueTimer();
+        flushCheckInQueue();
+
+        msgEl.textContent = '認証しています…'; // 次回のために戻しておく
+        document.getElementById('auth-overlay').classList.add('hidden'); // 名簿が揃った、カメラ画面を表示
       } else {
         authFailed = true;
         stopScannerAndReturnToLogin(data.message);
@@ -836,7 +1006,15 @@
       scannerInstance.clear().catch(() => {});
       scannerInstance = null;
     }
-    searchIndexData = null; // セッションが変わるため検索データを破棄
+
+    // 未送信の記録が残っていれば、画面を離れる前に送っておく
+    flushCheckInQueue();
+    if (flushTimer) {
+      clearInterval(flushTimer);
+      flushTimer = null;
+    }
+
+    rosterData = null; // セッションが変わるため名簿を破棄
     document.getElementById('setup-area').classList.add('hidden');
     document.getElementById('search-area').classList.add('hidden');
     document.getElementById('auth-overlay').classList.add('hidden'); // 次回のためにリセット
@@ -856,12 +1034,8 @@
       "reader",
       {
         fps: 10,
-        aspectRatio: 1.0,   // 映像を1:1で取得する
-        qrbox: function (w, h) {
-          const size = Math.floor(Math.min(w, h) * 0.7);
-          return { width: size, height: size };
-        },
-        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+        qrbox: 230,
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] // 画像ファイル読込は使用しない
       }
     );
     scannerInstance.render((decodedText) => {
@@ -972,12 +1146,11 @@
     document.getElementById('search-input').value = '';
     document.getElementById('search-results').innerHTML = '';
 
-    // 初回だけインデックスを取得し、以降は再利用する
-    if (searchIndexData === null) {
-      loadSearchIndex();
-    } else {
-      document.getElementById('search-status').textContent = searchIndexData.length + '件から検索できます';
-    }
+    const statusEl = document.getElementById('search-status');
+    statusEl.textContent = rosterData
+      ? rosterData.length + '件から検索できます'
+      : '名簿を読み込み中です...';
+
     document.getElementById('search-input').focus();
   }
 
@@ -986,41 +1159,125 @@
     document.getElementById('scan-area').classList.remove('hidden');
   }
 
-  async function loadSearchIndex() {
-    const statusEl = document.getElementById('search-status');
-    statusEl.textContent = '読み込み中...';
+  /**
+   * 名簿を取得して端末内に保持する。
+   * 照会も名前検索も、以降はこのデータだけで完結する。
+   */
+  async function loadRoster(onStatus) {
+    if (onStatus) onStatus('名簿を読み込み中...');
 
     try {
       const data = await postToGas(
         { action: 'searchIndex', token: authToken },
         function (retryCount) {
-          statusEl.textContent = '接続が不安定です。再試行中... (' + retryCount + '/' + FETCH_MAX_RETRIES + ')';
+          if (onStatus) onStatus('接続が不安定です。再試行中... (' + retryCount + '/' + FETCH_MAX_RETRIES + ')');
         }
       );
 
       if (data.success) {
-        searchIndexData = data.list;
-        statusEl.textContent = searchIndexData.length + '件から検索できます';
-      } else {
-        statusEl.textContent = '読み込みに失敗しました: ' + data.message;
+        rosterData = data.list;
+        // 入力のたびに全件を変換すると無駄なので、正規化済みの名前を事前に持たせておく
+        rosterData.forEach(function (p) {
+          p._searchKey = normalizeForSearch(p.name);
+        });
+        if (onStatus) onStatus(rosterData.length + '件から検索できます');
+        return true;
       }
+
+      if (onStatus) onStatus('読み込みに失敗しました: ' + data.message);
+      return false;
+
     } catch (err) {
-      statusEl.textContent = '通信エラーが発生しました';
+      console.error('[名簿の取得失敗]', err.name, err.message);
+      if (onStatus) onStatus('名簿を取得できませんでした');
+      return false;
     }
   }
 
-  document.getElementById('search-input').addEventListener('input', function () {
+  /**
+   * 名簿を取り直す。
+   * 受付中に申込が追加された場合に、再ログインせず反映させるためのもの。
+   */
+  async function reloadRoster() {
+    const nameEl = document.getElementById('res-name');
+    const deptEl = document.getElementById('res-dept');
+    const badgeEl = document.getElementById('res-badge');
+
+    document.getElementById('info').classList.remove('hidden');
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('lottery-banner').classList.add('hidden');
+    nameEl.classList.add('placeholder-row');
+    nameEl.innerText = '名簿を再取得しています...';
+    deptEl.innerText = '';
+    badgeEl.innerHTML = '';
+
+    // この端末で記録済みの分は、取り直しても「照会済み」のままにしておく
+    const checkedHere = {};
+    if (rosterData) {
+      rosterData.forEach(function (p) {
+        if (p.checked) checkedHere[String(p.id)] = true;
+      });
+    }
+
+    const ok = await loadRoster();
+
+    if (ok) {
+      rosterData.forEach(function (p) {
+        if (checkedHere[String(p.id)]) p.checked = true;
+      });
+      nameEl.innerText = '名簿を再取得しました（' + rosterData.length + '件）';
+    } else {
+      nameEl.classList.remove('placeholder-row');
+      nameEl.innerHTML = '<span class="res-error">名簿を再取得できませんでした</span>';
+    }
+  }
+
+  // 日本語入力の変換中は検索を走らせない（変換候補が確定する前に絞り込むと結果が安定しないため）
+  let isSearchComposing = false;
+  const searchInputEl = document.getElementById('search-input');
+
+  searchInputEl.addEventListener('compositionstart', function () {
+    isSearchComposing = true;
+  });
+
+  searchInputEl.addEventListener('compositionend', function (e) {
+    isSearchComposing = false;
+    renderSearchResults(e.target.value.trim());
+  });
+
+  searchInputEl.addEventListener('input', function () {
+    if (isSearchComposing) return;
     renderSearchResults(this.value.trim());
   });
+
+  /**
+   * 検索用に文字列を正規化する。
+   * ひらがな・カタカナの違いや、全角半角の揺れを吸収して
+   * 「たなか」でも「タナカ」でもヒットするようにする。
+   */
+  function normalizeForSearch(str) {
+    if (!str) return '';
+
+    return String(str)
+      .normalize('NFKC')          // 半角カタカナ・全角英数を標準形に揃える
+      .replace(/[ぁ-ゖ]/g, function (c) {
+        // ひらがなをカタカナに変換して比較する
+        return String.fromCharCode(c.charCodeAt(0) + 0x60);
+      })
+      .replace(/\s+/g, '')        // 空白の有無による差をなくす
+      .toLowerCase();
+  }
 
   function renderSearchResults(keyword) {
     const listEl = document.getElementById('search-results');
     listEl.innerHTML = '';
 
-    if (!keyword || !searchIndexData) return;
+    if (!keyword || !rosterData) return;
 
-    const matches = searchIndexData
-      .filter(p => String(p.name).includes(keyword))
+    const normalizedKeyword = normalizeForSearch(keyword);
+
+    const matches = rosterData
+      .filter(p => (p._searchKey || '').includes(normalizedKeyword))
       .slice(0, 20);
 
     if (matches.length === 0) {
@@ -1064,109 +1321,76 @@
     // スキャン画面に戻してから、QRスキャンと全く同じ処理・演出を通す
     closeSearchView();
 
-    // ローカルのインデックスも更新しておく(次回検索時の表示に反映するため)
-    person.checked = true;
-
+    // checkedの更新はlookupUser側で行う。
+    // ここで先に立ててしまうと、初回なのに「照会済み」と表示されてしまう
     lookupUser(person.id);
   }
 
-  async function lookupUser(qrId) {
+  /**
+   * 照会処理。
+   * 通信はせず、ログイン時に取得した端末内の名簿だけで完結させる。
+   * チェックインの記録は送信キューに積み、後でまとめて送る。
+   */
+  function lookupUser(qrId) {
     isLookupInProgress = true;
 
-    document.getElementById('loading').classList.remove('hidden');
-    document.getElementById('info').classList.add('hidden');
+    const loadingEl = document.getElementById('loading');
+    const infoEl = document.getElementById('info');
+    const nameEl = document.getElementById('res-name');
+    const deptEl = document.getElementById('res-dept');
+    const badgeEl = document.getElementById('res-badge');
+    const lotteryBanner = document.getElementById('lottery-banner');
 
-    let waitCount = 0;
-    while (!authToken && !authFailed && waitCount < 50) {
-      await new Promise(r => setTimeout(r, 100));
-      waitCount++;
-    }
-
-    if (!authToken) {
-      document.getElementById('loading').classList.add('hidden');
-      document.getElementById('info').classList.remove('hidden');
-      const nameEl = document.getElementById('res-name');
-      nameEl.classList.remove('placeholder-row');
-      nameEl.innerHTML = '<span class="res-error">認証エラー: ログインに失敗しました</span>';
-      document.getElementById('res-dept').innerText = '';
-      document.getElementById('res-badge').innerHTML = '';
-      document.getElementById('lottery-banner').classList.add('hidden');
+    function showError(message) {
+      nameEl.innerHTML = '<span class="res-error">' + message + '</span>';
+      deptEl.innerText = '';
+      badgeEl.innerHTML = '';
+      lotteryBanner.classList.add('hidden');
       playErrorSound();
-      isLookupInProgress = false;
-      return;
     }
 
     try {
-      const loadingEl = document.getElementById('loading');
-
-      const data = await postToGas(
-        { action: 'lookup', token: authToken, qrId: qrId },
-        function (retryCount) {
-          loadingEl.innerHTML =
-            '<span class="spinner"></span> 接続が不安定です。再試行中... (' + retryCount + '/' + FETCH_MAX_RETRIES + ')';
-        }
-      );
-
-      // 再試行の表示を元に戻す
-      loadingEl.innerHTML = '<span class="spinner"></span> 照会中...';
-
-      document.getElementById('loading').classList.add('hidden');
-      document.getElementById('info').classList.remove('hidden');
-      const nameEl = document.getElementById('res-name');
+      loadingEl.classList.add('hidden');
+      infoEl.classList.remove('hidden');
       nameEl.classList.remove('placeholder-row');
 
-      if (data.success) {
-        nameEl.innerText = data.name;
-        document.getElementById('res-dept').innerText = '人数: ' + data.count + '名';
-
-        const badge = data.alreadyChecked
-          ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
-          : '<span class="badge badge-ok">✓ 新規照会</span>';
-        document.getElementById('res-badge').innerHTML = badge;
-
-        const lotteryBanner = document.getElementById('lottery-banner');
-        if (data.isLottery) {
-          // 再生のたびにアニメーションが走るよう、一度クラスを外してから付け直す
-          lotteryBanner.classList.remove('hidden');
-          lotteryBanner.style.animation = 'none';
-          void lotteryBanner.offsetWidth; // 強制リフロー(アニメーション再トリガーのため)
-          lotteryBanner.style.animation = '';
-          playLotterySound();
-        } else {
-          lotteryBanner.classList.add('hidden');
-          playSuccessSound();
-        }
-      } else {
-        nameEl.innerHTML = '<span class="res-error">' + data.message + '</span>';
-        document.getElementById('res-dept').innerText = '';
-        document.getElementById('res-badge').innerHTML = '';
-        document.getElementById('lottery-banner').classList.add('hidden');
-
-        playErrorSound();
-
-        if (data.message.includes('認証エラー')) {
-          authToken = null;
-          sessionStorage.removeItem('auth_token');
-          stopScannerAndReturnToLogin('セッションが切れました。再度ログインしてください');
-        }
+      if (!rosterData) {
+        showError('名簿を読み込み中です。少し待ってから再度スキャンしてください');
+        return;
       }
-    } catch (err) {
-      // 切り分け用：実際のエラー内容をコンソールに出す
-      console.error('[照会通信失敗]', err.name, err.message, err);
 
-      // 再試行の表示を元に戻しておく
-      document.getElementById('loading').innerHTML = '<span class="spinner"></span> 照会中...';
+      const person = rosterData.find(p => String(p.id) === String(qrId));
 
-      // catchが無いと「照会中...」のまま固まってしまうため、エラーを表示する
-      document.getElementById('loading').classList.add('hidden');
-      document.getElementById('info').classList.remove('hidden');
-      const nameEl = document.getElementById('res-name');
-      nameEl.classList.remove('placeholder-row');
-      nameEl.innerHTML = '<span class="res-error">通信エラー: もう一度スキャンしてください</span>';
-      document.getElementById('res-dept').innerText = '';
-      document.getElementById('res-badge').innerHTML = '';
-      document.getElementById('lottery-banner').classList.add('hidden');
-      playErrorSound();
+      if (!person) {
+        showError('対象者が見つかりません');
+        return;
+      }
+
+      // 名簿を取得した時点、またはこの端末で既に読んだかどうかで判定する
+      const alreadyChecked = person.checked === true;
+      person.checked = true;
+
+      // 記録はキューに積むだけ。送信はまとめて行う
+      enqueueCheckIn(person.id);
+
+      nameEl.innerText = person.name;
+      deptEl.innerText = '人数: ' + person.count + '名';
+
+      badgeEl.innerHTML = alreadyChecked
+        ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
+        : '<span class="badge badge-ok">✓ 新規照会</span>';
+
+      if (person.isLottery) {
+        // 再生のたびにアニメーションが走るよう、一度リセットしてから付け直す
+        lotteryBanner.classList.remove('hidden');
+        lotteryBanner.style.animation = 'none';
+        void lotteryBanner.offsetWidth; // 強制リフロー(アニメーション再トリガーのため)
+        lotteryBanner.style.animation = '';
+        playLotterySound();
+      } else {
+        lotteryBanner.classList.add('hidden');
+        playSuccessSound();
+      }
     } finally {
       isLookupInProgress = false;
     }
