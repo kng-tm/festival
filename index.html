@@ -414,6 +414,24 @@
     margin-top: 14px;
   }
 
+  /* 結果を確認したことを明示してもらうためのボタン。押すまで次のスキャンに進まない */
+  .btn-confirm{
+    width: 100%;
+    margin-top: 16px;
+    padding: 12px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #FFFFFF;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter .12s ease, transform .12s ease;
+  }
+  .btn-confirm:hover{ filter: brightness(1.15); }
+  .btn-confirm:active{ transform: scale(0.98); }
+
   /* 未送信があるときだけ出る小さな送信ボタン。件数までは出さない */
   .pending-btn{
     display: inline-flex;
@@ -620,6 +638,7 @@
           <p class="res-dept" id="res-dept"></p>
           <div id="lottery-banner" class="lottery-banner hidden">🎉 おめでとうございます 🎉</div>
           <p id="res-badge"></p>
+          <button id="confirm-btn" class="btn-confirm hidden" onclick="confirmResult()" type="button">確認して次へ</button>
         </div>
       </div>
 
@@ -671,6 +690,16 @@
   let resultDisplayTimer = null;
   let lookupGeneration = 0;
 
+  // 照会できたときは、確認ボタンを押すまで次のスキャンを受け付けない。
+  // 結果を見落としたまま次の人に進んでしまうのを防ぐため
+  let awaitingConfirm = false;
+
+  // 名簿にないIDを読んだとき、当日追加された人の可能性があるため名簿を取り直す。
+  // ただし無関係なQRコードを読むたびに取りに行かないよう、歯止めをかける
+  const ROSTER_REFETCH_COOLDOWN_MS = 30000; // 前回の取り直しからこの時間は再取得しない
+  let lastRosterFetchAt = 0;
+  const refetchedForIds = {}; // 一度取り直して見つからなかったIDは、二度と取りに行かない
+
   /* ---- 通信処理（タイムアウトと自動再試行） ---- */
   const FETCH_MAX_RETRIES = 2;     // 初回を含めて最大3回試行する
   const FETCH_RETRY_WAIT_MS = 700; // 再試行までの待ち時間（回数に応じて伸ばす）
@@ -683,10 +712,11 @@
    *
    * onRetry: 再試行に入ったときに呼ばれる。画面表示の更新に使う。
    */
-  async function postToGas(payload, onRetry) {
+  async function postToGas(payload, onRetry, maxRetries) {
+    const retryLimit = (typeof maxRetries === 'number') ? maxRetries : FETCH_MAX_RETRIES;
     let lastError = null;
 
-    for (let attempt = 0; attempt <= FETCH_MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt <= retryLimit; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -707,7 +737,7 @@
         const reason = (err.name === 'AbortError') ? 'タイムアウト' : err.message;
         console.error('[通信失敗 ' + (attempt + 1) + '回目]', err.name, reason);
 
-        if (attempt < FETCH_MAX_RETRIES) {
+        if (attempt < retryLimit) {
           if (onRetry) onRetry(attempt + 1);
           // 少し待ってから再試行する（瞬間的な不調を吸収するため）
           await new Promise(r => setTimeout(r, FETCH_RETRY_WAIT_MS * (attempt + 1)));
@@ -1074,6 +1104,11 @@
     }
 
     rosterData = null; // セッションが変わるため名簿を破棄
+    lastRosterFetchAt = 0;
+    for (const k in refetchedForIds) delete refetchedForIds[k];
+
+    awaitingConfirm = false;
+    document.getElementById('confirm-btn').classList.add('hidden');
     document.getElementById('setup-area').classList.add('hidden');
     document.getElementById('search-area').classList.add('hidden');
     document.getElementById('auth-overlay').classList.add('hidden'); // 次回のためにリセット
@@ -1098,7 +1133,8 @@
       }
     );
     scannerInstance.render((decodedText) => {
-      if (authFailed || isLookupInProgress) return;
+      // 確認ボタン待ちの間は、次の人を読み取らない
+      if (authFailed || isLookupInProgress || awaitingConfirm) return;
 
       const now = Date.now();
       // 同じQRコードを短時間に連続検出した場合は無視する（連続スキャンのための誤検出防止）
@@ -1199,18 +1235,25 @@
 
   /* ---- 名前検索画面 ---- */
 
-  function openSearchView() {
+  async function openSearchView() {
     document.getElementById('scan-area').classList.add('hidden');
     document.getElementById('search-area').classList.remove('hidden');
     document.getElementById('search-input').value = '';
     document.getElementById('search-results').innerHTML = '';
+    document.getElementById('search-input').focus();
 
     const statusEl = document.getElementById('search-status');
-    statusEl.textContent = rosterData
-      ? rosterData.length + '件から検索できます'
-      : '名簿を読み込み中です...';
 
-    document.getElementById('search-input').focus();
+    // 当日追加された人もその場で探せるよう、開いた時点で名簿を取り直す。
+    // QRが読めなかったときにしか開かない画面なので、毎回取りに行っても負荷にならない
+    const ok = await loadRoster(function (text) { statusEl.textContent = text; });
+
+    if (ok) {
+      // 最新の名簿に入れ替わったので、自動取り直しの履歴も白紙に戻す
+      for (const k in refetchedForIds) delete refetchedForIds[k];
+      // 取得を待つ間に入力されていた場合に備えて、結果を出し直す
+      renderSearchResults(document.getElementById('search-input').value.trim());
+    }
   }
 
   function closeSearchView() {
@@ -1222,23 +1265,35 @@
    * 名簿を取得して端末内に保持する。
    * 照会も名前検索も、以降はこのデータだけで完結する。
    */
-  async function loadRoster(onStatus) {
+  async function loadRoster(onStatus, maxRetries) {
     if (onStatus) onStatus('名簿を読み込み中...');
+
+    // 取り直しの場合に備え、この端末で記録済みの分を控えておく。
+    // サーバー側の状態で上書きして「照会済み」が巻き戻るのを防ぐため
+    const checkedHere = {};
+    if (rosterData) {
+      rosterData.forEach(function (p) {
+        if (p.checked) checkedHere[String(p.id)] = true;
+      });
+    }
 
     try {
       const data = await postToGas(
         { action: 'searchIndex', token: authToken },
         function (retryCount) {
-          if (onStatus) onStatus('接続が不安定です。再試行中... (' + retryCount + '/' + FETCH_MAX_RETRIES + ')');
-        }
+          if (onStatus) onStatus('接続が不安定です。再試行中...(' + retryCount + ')');
+        },
+        maxRetries
       );
 
       if (data.success) {
         rosterData = data.list;
-        // 入力のたびに全件を変換すると無駄なので、正規化済みの名前を事前に持たせておく
         rosterData.forEach(function (p) {
+          // 入力のたびに全件を変換すると無駄なので、正規化済みの名前を持たせておく
           p._searchKey = normalizeForSearch(p.name);
+          if (checkedHere[String(p.id)]) p.checked = true;
         });
+        lastRosterFetchAt = Date.now();
         if (onStatus) onStatus(rosterData.length + '件から検索できます');
         return true;
       }
@@ -1270,20 +1325,11 @@
     deptEl.innerText = '';
     badgeEl.innerHTML = '';
 
-    // この端末で記録済みの分は、取り直しても「照会済み」のままにしておく
-    const checkedHere = {};
-    if (rosterData) {
-      rosterData.forEach(function (p) {
-        if (p.checked) checkedHere[String(p.id)] = true;
-      });
-    }
-
-    const ok = await loadRoster();
+    const ok = await loadRoster(); // この端末の「照会済み」はloadRoster側で引き継がれる
 
     if (ok) {
-      rosterData.forEach(function (p) {
-        if (checkedHere[String(p.id)]) p.checked = true;
-      });
+      // 手動で取り直したので、自動の取り直し履歴はいったん白紙に戻す
+      for (const k in refetchedForIds) delete refetchedForIds[k];
       nameEl.innerText = '名簿を再取得しました（' + rosterData.length + '件）';
     } else {
       nameEl.classList.remove('placeholder-row');
@@ -1395,86 +1441,163 @@
    * 「読み取れたのか分からない」状態になってしまうため。
    */
   function lookupUser(qrId) {
+    // 表示待ちの結果があれば破棄し、この回の結果で上書きする
+    const myGeneration = ++lookupGeneration;
+    if (resultDisplayTimer) clearTimeout(resultDisplayTimer);
+
+    // 新しい照会が始まるので、前回の確認待ちは解除する
+    // (名前検索から選んだ場合など、スキャン以外の経路で来ることがある)
+    awaitingConfirm = false;
+    document.getElementById('confirm-btn').classList.add('hidden');
+
+    // 「照会中...」を見せる
+    isLookupInProgress = true;
+    document.getElementById('info').classList.add('hidden');
+    document.getElementById('loading').classList.remove('hidden');
+
+    if (!rosterData) {
+      scheduleResult(myGeneration, { ok: false, message: '名簿を読み込み中です。少し待ってから再度スキャンしてください' });
+      return;
+    }
+
+    const person = findInRoster(qrId);
+    if (person) {
+      scheduleResult(myGeneration, commitCheckIn(person));
+      return;
+    }
+
+    // 名簿にない。当日追加された人の可能性があるので、
+    // 条件を満たす場合だけ名簿を取り直してもう一度照合する
+    if (canRefetchFor(qrId)) {
+      refetchThenLookup(myGeneration, qrId);
+      return;
+    }
+
+    scheduleResult(myGeneration, { ok: false, message: '対象者が見つかりません' });
+  }
+
+  function findInRoster(qrId) {
+    return rosterData.find(p => String(p.id) === String(qrId));
+  }
+
+  /** 判定を確定し、チェックインを送信キューに積む */
+  function commitCheckIn(person) {
+    const alreadyChecked = person.checked === true;
+    person.checked = true;
+    enqueueCheckIn(person.id);
+    return { ok: true, person: person, alreadyChecked: alreadyChecked };
+  }
+
+  /**
+   * 名簿を取り直してよいか。
+   * 無関係なQRコードを読むたびに取りに行かないよう、二重に歯止めをかける。
+   */
+  function canRefetchFor(qrId) {
+    if (refetchedForIds[String(qrId)]) return false; // 一度取り直しても居なかったID
+    if (Date.now() - lastRosterFetchAt < ROSTER_REFETCH_COOLDOWN_MS) return false;
+    return true;
+  }
+
+  async function refetchThenLookup(myGeneration, qrId) {
     const loadingEl = document.getElementById('loading');
-    const infoEl = document.getElementById('info');
+    loadingEl.innerHTML = '<span class="spinner"></span> 名簿を確認しています...';
+
+    // ここでの取り直しはスキャンを止めてしまうため、再試行は1回までに抑える
+    const ok = await loadRoster(null, 1);
+
+    loadingEl.innerHTML = '<span class="spinner"></span> 照会中...';
+
+    if (myGeneration !== lookupGeneration) return; // 新しいスキャンに追い越された
+
+    if (!ok) {
+      showResult(myGeneration, { ok: false, message: '対象者が見つかりません（名簿を確認できませんでした）' });
+      return;
+    }
+
+    const person = findInRoster(qrId);
+    if (person) {
+      showResult(myGeneration, commitCheckIn(person));
+    } else {
+      refetchedForIds[String(qrId)] = true; // 取り直しても居なかったので、もう取りに行かない
+      showResult(myGeneration, { ok: false, message: '対象者が見つかりません' });
+    }
+  }
+
+  /** 少し置いてから結果を出す（読み取れたことを伝えるための間） */
+  function scheduleResult(myGeneration, result) {
+    resultDisplayTimer = setTimeout(function () {
+      resultDisplayTimer = null;
+      showResult(myGeneration, result);
+    }, RESULT_DELAY_MS);
+  }
+
+  function showResult(myGeneration, result) {
+    if (myGeneration !== lookupGeneration) return; // 新しいスキャンに追い越された
+
     const nameEl = document.getElementById('res-name');
     const deptEl = document.getElementById('res-dept');
     const badgeEl = document.getElementById('res-badge');
     const lotteryBanner = document.getElementById('lottery-banner');
 
-    // 表示待ちの結果があれば破棄し、この回の結果で上書きする
-    const myGeneration = ++lookupGeneration;
-    if (resultDisplayTimer) clearTimeout(resultDisplayTimer);
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('info').classList.remove('hidden');
+    nameEl.classList.remove('placeholder-row');
 
-    // --- 判定と記録は遅らせずにここで確定させる ---
-    let result;
-
-    if (!rosterData) {
-      result = { ok: false, message: '名簿を読み込み中です。少し待ってから再度スキャンしてください' };
-    } else {
-      const person = rosterData.find(p => String(p.id) === String(qrId));
-
-      if (!person) {
-        result = { ok: false, message: '対象者が見つかりません' };
-      } else {
-        // 名簿を取得した時点、またはこの端末で既に読んだかどうかで判定する
-        const alreadyChecked = person.checked === true;
-        person.checked = true;
-
-        // 記録はキューに積むだけ。送信はまとめて行う
-        enqueueCheckIn(person.id);
-
-        result = { ok: true, person: person, alreadyChecked: alreadyChecked };
-      }
+    if (!result.ok) {
+      nameEl.innerHTML = '<span class="res-error">' + result.message + '</span>';
+      deptEl.innerText = '';
+      badgeEl.innerHTML = '';
+      lotteryBanner.classList.add('hidden');
+      playErrorSound();
+      isLookupInProgress = false;
+      return;
     }
 
-    // --- 「照会中...」を見せる ---
-    isLookupInProgress = true;
-    infoEl.classList.add('hidden');
-    loadingEl.classList.remove('hidden');
+    const person = result.person;
 
-    // --- 少し置いてから結果を出す ---
-    resultDisplayTimer = setTimeout(function () {
-      resultDisplayTimer = null;
-      if (myGeneration !== lookupGeneration) return; // 新しいスキャンに追い越された
+    nameEl.innerText = person.name;
+    deptEl.innerText = '人数: ' + person.count + '名';
 
-      loadingEl.classList.add('hidden');
-      infoEl.classList.remove('hidden');
-      nameEl.classList.remove('placeholder-row');
+    badgeEl.innerHTML = result.alreadyChecked
+      ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
+      : '<span class="badge badge-ok">✓ 新規照会</span>';
 
-      if (!result.ok) {
-        nameEl.innerHTML = '<span class="res-error">' + result.message + '</span>';
-        deptEl.innerText = '';
-        badgeEl.innerHTML = '';
-        lotteryBanner.classList.add('hidden');
-        playErrorSound();
-        isLookupInProgress = false;
-        return;
-      }
+    if (person.isLottery) {
+      // 再生のたびにアニメーションが走るよう、一度リセットしてから付け直す
+      lotteryBanner.classList.remove('hidden');
+      lotteryBanner.style.animation = 'none';
+      void lotteryBanner.offsetWidth; // 強制リフロー(アニメーション再トリガーのため)
+      lotteryBanner.style.animation = '';
+      playLotterySound();
+    } else {
+      lotteryBanner.classList.add('hidden');
+      playSuccessSound();
+    }
 
-      const person = result.person;
+    // 照会できた場合は、確認ボタンを押すまで次のスキャンに進ませない
+    awaitingConfirm = true;
+    document.getElementById('confirm-btn').classList.remove('hidden');
 
-      nameEl.innerText = person.name;
-      deptEl.innerText = '人数: ' + person.count + '名';
+    isLookupInProgress = false;
+  }
 
-      badgeEl.innerHTML = result.alreadyChecked
-        ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
-        : '<span class="badge badge-ok">✓ 新規照会</span>';
+  /**
+   * 結果を確認したことを受けて、次のスキャンを受け付ける状態に戻す。
+   */
+  function confirmResult() {
+    awaitingConfirm = false;
+    document.getElementById('confirm-btn').classList.add('hidden');
 
-      if (person.isLottery) {
-        // 再生のたびにアニメーションが走るよう、一度リセットしてから付け直す
-        lotteryBanner.classList.remove('hidden');
-        lotteryBanner.style.animation = 'none';
-        void lotteryBanner.offsetWidth; // 強制リフロー(アニメーション再トリガーのため)
-        lotteryBanner.style.animation = '';
-        playLotterySound();
-      } else {
-        lotteryBanner.classList.add('hidden');
-        playSuccessSound();
-      }
+    // 前の人の結果が残っていると紛らわしいので、初期表示に戻す
+    const nameEl = document.getElementById('res-name');
+    nameEl.classList.add('placeholder-row');
+    nameEl.innerText = 'QRコードをスキャンしてください';
+    document.getElementById('res-dept').innerText = '';
+    document.getElementById('res-badge').innerHTML = '';
+    document.getElementById('lottery-banner').classList.add('hidden');
 
-      isLookupInProgress = false;
-    }, RESULT_DELAY_MS);
+    // 直前に読んだQRがまだカメラに映っていても、すぐには再検出しないようにする
+    lastScanTime = Date.now();
   }
 </script>
 </body>
