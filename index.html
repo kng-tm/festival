@@ -543,7 +543,7 @@
         <label for="login-id">ID</label>
         <input id="login-id" type="text" placeholder="user ID" autocomplete="username" lang="en"
                inputmode="email" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <p class="field-hint">半角英数字で入力してください</p>
+        <p class="field-hint">半角英数字で入力してください（日本語入力はオフにしてください）</p>
       </div>
       <div class="field">
         <label for="login-pw">パスワード</label>
@@ -651,6 +651,12 @@
   let lastScanTime = 0;
   let rosterData = null; // 名簿。ログイン時に1回だけ取得し、照会も名前検索もこれで完結させる
   const SCAN_COOLDOWN_MS = 2500; // 同一QRコードの連続誤検出を防ぐための間隔
+
+  // ローカル照合は一瞬で終わるため、そのまま結果を出すと読み取れたことが分からない。
+  // 「照会中...」を意図的に少しだけ挟んで、スキャンが通ったことを伝える
+  const RESULT_DELAY_MS = 300;
+  let resultDisplayTimer = null;
+  let lookupGeneration = 0;
 
   /* ---- 通信処理（タイムアウトと自動再試行） ---- */
   const FETCH_MAX_RETRIES = 2;     // 初回を含めて最大3回試行する
@@ -1007,6 +1013,14 @@
       scannerInstance = null;
     }
 
+    // 表示待ちの結果が残っていれば取り消す
+    if (resultDisplayTimer) {
+      clearTimeout(resultDisplayTimer);
+      resultDisplayTimer = null;
+    }
+    lookupGeneration++;
+    isLookupInProgress = false;
+
     // 未送信の記録が残っていれば、画面を離れる前に送っておく
     flushCheckInQueue();
     if (flushTimer) {
@@ -1330,10 +1344,12 @@
    * 照会処理。
    * 通信はせず、ログイン時に取得した端末内の名簿だけで完結させる。
    * チェックインの記録は送信キューに積み、後でまとめて送る。
+   *
+   * 判定と記録は即座に行うが、結果の表示だけは少し遅らせている。
+   * ローカル照合は一瞬で終わるため、そのまま表示すると
+   * 「読み取れたのか分からない」状態になってしまうため。
    */
   function lookupUser(qrId) {
-    isLookupInProgress = true;
-
     const loadingEl = document.getElementById('loading');
     const infoEl = document.getElementById('info');
     const nameEl = document.getElementById('res-name');
@@ -1341,42 +1357,62 @@
     const badgeEl = document.getElementById('res-badge');
     const lotteryBanner = document.getElementById('lottery-banner');
 
-    function showError(message) {
-      nameEl.innerHTML = '<span class="res-error">' + message + '</span>';
-      deptEl.innerText = '';
-      badgeEl.innerHTML = '';
-      lotteryBanner.classList.add('hidden');
-      playErrorSound();
+    // 表示待ちの結果があれば破棄し、この回の結果で上書きする
+    const myGeneration = ++lookupGeneration;
+    if (resultDisplayTimer) clearTimeout(resultDisplayTimer);
+
+    // --- 判定と記録は遅らせずにここで確定させる ---
+    let result;
+
+    if (!rosterData) {
+      result = { ok: false, message: '名簿を読み込み中です。少し待ってから再度スキャンしてください' };
+    } else {
+      const person = rosterData.find(p => String(p.id) === String(qrId));
+
+      if (!person) {
+        result = { ok: false, message: '対象者が見つかりません' };
+      } else {
+        // 名簿を取得した時点、またはこの端末で既に読んだかどうかで判定する
+        const alreadyChecked = person.checked === true;
+        person.checked = true;
+
+        // 記録はキューに積むだけ。送信はまとめて行う
+        enqueueCheckIn(person.id);
+
+        result = { ok: true, person: person, alreadyChecked: alreadyChecked };
+      }
     }
 
-    try {
+    // --- 「照会中...」を見せる ---
+    isLookupInProgress = true;
+    infoEl.classList.add('hidden');
+    loadingEl.classList.remove('hidden');
+
+    // --- 少し置いてから結果を出す ---
+    resultDisplayTimer = setTimeout(function () {
+      resultDisplayTimer = null;
+      if (myGeneration !== lookupGeneration) return; // 新しいスキャンに追い越された
+
       loadingEl.classList.add('hidden');
       infoEl.classList.remove('hidden');
       nameEl.classList.remove('placeholder-row');
 
-      if (!rosterData) {
-        showError('名簿を読み込み中です。少し待ってから再度スキャンしてください');
+      if (!result.ok) {
+        nameEl.innerHTML = '<span class="res-error">' + result.message + '</span>';
+        deptEl.innerText = '';
+        badgeEl.innerHTML = '';
+        lotteryBanner.classList.add('hidden');
+        playErrorSound();
+        isLookupInProgress = false;
         return;
       }
 
-      const person = rosterData.find(p => String(p.id) === String(qrId));
-
-      if (!person) {
-        showError('対象者が見つかりません');
-        return;
-      }
-
-      // 名簿を取得した時点、またはこの端末で既に読んだかどうかで判定する
-      const alreadyChecked = person.checked === true;
-      person.checked = true;
-
-      // 記録はキューに積むだけ。送信はまとめて行う
-      enqueueCheckIn(person.id);
+      const person = result.person;
 
       nameEl.innerText = person.name;
       deptEl.innerText = '人数: ' + person.count + '名';
 
-      badgeEl.innerHTML = alreadyChecked
+      badgeEl.innerHTML = result.alreadyChecked
         ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
         : '<span class="badge badge-ok">✓ 新規照会</span>';
 
@@ -1391,9 +1427,9 @@
         lotteryBanner.classList.add('hidden');
         playSuccessSound();
       }
-    } finally {
+
       isLookupInProgress = false;
-    }
+    }, RESULT_DELAY_MS);
   }
 </script>
 </body>
