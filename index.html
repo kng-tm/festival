@@ -654,7 +654,7 @@
 
   // ローカル照合は一瞬で終わるため、そのまま結果を出すと読み取れたことが分からない。
   // 「照会中...」を意図的に少しだけ挟んで、スキャンが通ったことを伝える
-  const RESULT_DELAY_MS = 300;
+  const RESULT_DELAY_MS = 500;
   let resultDisplayTimer = null;
   let lookupGeneration = 0;
 
