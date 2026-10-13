@@ -271,7 +271,12 @@
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
+    /* iOS Safariの下部アドレスバーを避ける。
+       position:fixedの bottom:0 はアドレスバーの裏側まで含む領域の下端を指すため、
+       そのままだとパネルの下部が隠れる。
+       実際に見えている高さとの差を --vv-bottom に入れて、その分持ち上げる
+       （値はJS側の updateViewportInset() が設定する） */
+    bottom: var(--vv-bottom, 0px);
     margin: 0 auto;
     max-width: 432px; /* カード(400) + 左右の余白(16×2) */
     z-index: 50;
@@ -1629,8 +1634,37 @@
   const SHEET_AUTO_CLOSE_MS = 4000; // エラー表示を自動で閉じるまでの時間
   let sheetCloseTimer = null;
 
+  /**
+   * 画面の下端と、実際に見えている領域の下端との差を --vv-bottom に入れる。
+   *
+   * iOS Safariは下部にアドレスバーがあり、position:fixed の bottom:0 は
+   * その裏側まで含む領域の下端を指す。env(safe-area-inset-bottom) は
+   * ホームインジケータ用でアドレスバーの高さを含まないため、これだけでは防げない。
+   * visualViewport は実際に見えている領域を返すので、その差を使って持ち上げる。
+   * ソフトキーボードが出た場合も同じ仕組みで避けられる。
+   */
+  function updateViewportInset() {
+    const vv = window.visualViewport;
+    if (!vv) return; // 未対応の環境では従来どおり bottom:0 のまま
+    let inset = window.innerHeight - (vv.height + vv.offsetTop);
+    // 想定外の値でパネルが宙に浮かないよう、妥当な範囲に収める
+    if (!isFinite(inset) || inset < 0) inset = 0;
+    if (inset > 240) inset = 240;
+    document.documentElement.style.setProperty('--vv-bottom', Math.round(inset) + 'px');
+  }
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateViewportInset);
+    window.visualViewport.addEventListener('scroll', updateViewportInset);
+  }
+  window.addEventListener('orientationchange', function () {
+    setTimeout(updateViewportInset, 300); // 回転の描画が落ち着いてから測る
+  });
+  updateViewportInset();
+
   function openSheet() {
     if (sheetCloseTimer) { clearTimeout(sheetCloseTimer); sheetCloseTimer = null; }
+    updateViewportInset(); // 開く直前の状態で測り直す
     document.getElementById('result-sheet').classList.add('open');
     document.getElementById('sheet-scrim').classList.add('open');
   }
