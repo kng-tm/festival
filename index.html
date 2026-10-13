@@ -21,6 +21,11 @@
     --success: #1F8A5F;
     --danger: #C0392B;
     --radius: 14px;
+
+    /* 結果パネルの下に確保する余白。
+       iOS Safariの下部アドレスバーに中身が被らないようにするためのもの。
+       実機を見て調整する想定。小さくすると被り、大きくするとパネルが間延びする */
+    --sheet-safe-gap: 72px;
   }
 
   *{ box-sizing: border-box; }
@@ -271,12 +276,7 @@
     position: fixed;
     left: 0;
     right: 0;
-    /* iOS Safariの下部アドレスバーを避ける。
-       position:fixedの bottom:0 はアドレスバーの裏側まで含む領域の下端を指すため、
-       そのままだとパネルの下部が隠れる。
-       実際に見えている高さとの差を --vv-bottom に入れて、その分持ち上げる
-       （値はJS側の updateViewportInset() が設定する） */
-    bottom: var(--vv-bottom, 0px);
+    bottom: 0;
     margin: 0 auto;
     max-width: 432px; /* カード(400) + 左右の余白(16×2) */
     z-index: 50;
@@ -285,7 +285,15 @@
     border-bottom: none;
     border-radius: 18px 18px 0 0;
     box-shadow: 0 -18px 44px -24px rgba(30,33,38,0.55);
-    padding: 14px 20px calc(22px + env(safe-area-inset-bottom, 0px));
+    /* iOS Safariの下部アドレスバー対策。
+       パネル自体は画面下端まで伸ばしたまま、内側に余白を取って中身を上に逃がす。
+       バーの高さに合わせて動かす方法だと、スクロールでバーが伸縮するたびに
+       パネルが上下してしまうため、固定の余白にして動かさないことを優先した。
+       パネルの背景が下端まで続くので、隙間からカメラ映像が覗くこともない。
+
+       --sheet-safe-gap が実機で大きすぎる・小さすぎる場合はこの値だけ調整する。
+       max()にしているのは、ホームインジケータ用の余白と二重に足さないため */
+    padding: 14px 20px calc(22px + max(var(--sheet-safe-gap), env(safe-area-inset-bottom, 0px)));
     transform: translateY(102%);
     transition: transform .24s cubic-bezier(.2,.8,.2,1);
     pointer-events: none;
@@ -634,7 +642,7 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
-      <h1>QRコード情報照会2</h1>
+      <h1>QRコード情報照会</h1>
       <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
@@ -1634,37 +1642,12 @@
   const SHEET_AUTO_CLOSE_MS = 4000; // エラー表示を自動で閉じるまでの時間
   let sheetCloseTimer = null;
 
-  /**
-   * 画面の下端と、実際に見えている領域の下端との差を --vv-bottom に入れる。
-   *
-   * iOS Safariは下部にアドレスバーがあり、position:fixed の bottom:0 は
-   * その裏側まで含む領域の下端を指す。env(safe-area-inset-bottom) は
-   * ホームインジケータ用でアドレスバーの高さを含まないため、これだけでは防げない。
-   * visualViewport は実際に見えている領域を返すので、その差を使って持ち上げる。
-   * ソフトキーボードが出た場合も同じ仕組みで避けられる。
-   */
-  function updateViewportInset() {
-    const vv = window.visualViewport;
-    if (!vv) return; // 未対応の環境では従来どおり bottom:0 のまま
-    let inset = window.innerHeight - (vv.height + vv.offsetTop);
-    // 想定外の値でパネルが宙に浮かないよう、妥当な範囲に収める
-    if (!isFinite(inset) || inset < 0) inset = 0;
-    if (inset > 240) inset = 240;
-    document.documentElement.style.setProperty('--vv-bottom', Math.round(inset) + 'px');
-  }
-
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', updateViewportInset);
-    window.visualViewport.addEventListener('scroll', updateViewportInset);
-  }
-  window.addEventListener('orientationchange', function () {
-    setTimeout(updateViewportInset, 300); // 回転の描画が落ち着いてから測る
-  });
-  updateViewportInset();
+  // 下部アドレスバーへの対策はCSSの --sheet-safe-gap で行う。
+  // バーの高さに合わせてJSで動かす方法も試せるが、スクロールでバーが伸縮するたびに
+  // パネルが上下するため、固定の余白で動かさないことを優先した
 
   function openSheet() {
     if (sheetCloseTimer) { clearTimeout(sheetCloseTimer); sheetCloseTimer = null; }
-    updateViewportInset(); // 開く直前の状態で測り直す
     document.getElementById('result-sheet').classList.add('open');
     document.getElementById('sheet-scrim').classList.add('open');
   }
