@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QRコード入場券照会</title>
+<title>QR情報照会</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -62,23 +62,31 @@
     box-shadow: 0 16px 40px -24px rgba(30,33,38,0.25);
   }
 
+  /* カメラ枠の中に置いて映像の上に重ねる。
+     映像が明るくても暗くても読めるよう、半透明の暗い円に白い縁を付ける。
+     枠の外に置くと、position:relativeな枠の方が後から描画されて隠れてしまう */
   .mute-btn{
     position: absolute;
-    top: 16px;
-    right: 16px;
-    width: 34px;
-    height: 34px;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
+    width: 38px;
+    height: 38px;
     border-radius: 50%;
-    border: 1px solid var(--border);
-    background: var(--surface-sunken);
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(16,19,26,0.55);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    color: #FFFFFF;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 15px;
+    font-size: 16px;
+    line-height: 1;
     cursor: pointer;
     transition: background .15s ease, transform .12s ease;
   }
-  .mute-btn:hover{ background: var(--accent-soft); }
+  .mute-btn:hover{ background: rgba(16,19,26,0.78); }
   .mute-btn:active{ transform: scale(0.94); }
 
   /* ---- 認証完了までスキャン画面を隠すオーバーレイ ---- */
@@ -202,6 +210,10 @@
   /* ---- スキャン画面全体の枠 ---- */
   .scan-frame{
     position: relative;
+    /* z-indexを与えて重なりの基準をここで閉じる。
+       こうしないと、枠の中の要素が認証オーバーレイ(20)や結果パネル(50)より
+       手前に出てしまうことがある */
+    z-index: 1;
     width:100%;
     border-radius: 12px;
     overflow: hidden;
@@ -251,14 +263,55 @@
     cursor: pointer !important;
   }
 
-  /* ---- 照会結果（画面上部に固定表示） ---- */
-  .result-box{
-    padding: 18px 18px 16px;
-    background: var(--surface-sunken);
+  /* ---- 照会結果（画面下部からせり上がるパネル） ----
+     position:fixed なのでスクロール位置に一切依存せず、常に同じ場所に出る。
+     確認ボタンが画面下部に来るため、片手でも親指が届く。
+     カメラ映像を覆うのは結果が出ている間だけで、狙いを定めている最中は全面が見える */
+  .result-sheet{
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0 auto;
+    max-width: 432px; /* カード(400) + 左右の余白(16×2) */
+    z-index: 50;
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    margin-bottom: 22px;
-    min-height: 88px;
+    border-bottom: none;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -18px 44px -24px rgba(30,33,38,0.55);
+    padding: 14px 20px calc(22px + env(safe-area-inset-bottom, 0px));
+    transform: translateY(102%);
+    transition: transform .24s cubic-bezier(.2,.8,.2,1);
+    pointer-events: none;
+  }
+  .result-sheet.open{
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  /* 下から出てくるパネルであることを示すつまみ */
+  .sheet-handle{
+    width: 38px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    margin: 0 auto 14px;
+  }
+  /* 背面を少し暗くして、結果に目を向けさせる。
+     確認待ちの間はスキャンが止まっているので、カメラが暗くなっても支障はない */
+  .sheet-scrim{
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(30,33,38,0.28);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .24s ease;
+  }
+  .sheet-scrim.open{ opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce){
+    .result-sheet, .sheet-scrim{ transition: none; }
   }
   .result-label{
     display:flex;
@@ -408,6 +461,15 @@
   .header-bottom{
     margin-top: 22px;
     text-align: center;
+  }
+  /* 補助ボタンを横並びにして、スクロールが必要な高さを減らす */
+  .btn-row{
+    display: flex;
+    gap: 8px;
+  }
+  .btn-row .btn-secondary{
+    flex: 1 1 0;
+    min-width: 0;
   }
   .header-bottom .brand{
     justify-content: center;
@@ -567,14 +629,14 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
-      <h1>QRコード入場券照会</h1>
-      <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
+      <h1>QRコード情報照会</h1>
+      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
       <div class="field">
         <label for="login-id">ID</label>
         <input id="login-id" type="text" placeholder="user ID" autocomplete="username" lang="en"
                inputmode="email" pattern="[A-Za-z0-9]*" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <p class="field-hint">半角英数字で入力してください</p>
+        <p class="field-hint">半角英数字で入力してください（日本語入力はオフにしてください）</p>
       </div>
       <div class="field">
         <label for="login-pw">パスワード</label>
@@ -626,34 +688,41 @@
         <p id="auth-overlay-message">認証しています…</p>
       </div>
 
-      <button id="mute-toggle" class="mute-btn" onclick="toggleMute()" aria-label="音声のオン・オフを切り替え" type="button">🔊</button>
-
-      <div id="result-box" class="result-box">
-        <div id="loading" class="loading-row hidden">
-          <span class="spinner"></span> 照会中...
-        </div>
-        <div id="info">
-          <div class="result-label"><span class="pulse"></span>照会結果</div>
-          <p class="res-name placeholder-row" id="res-name">QRコードをスキャンしてください</p>
-          <p class="res-dept" id="res-dept"></p>
-          <div id="lottery-banner" class="lottery-banner hidden">🎉 当たり 🎉</div>
-          <p id="res-badge"></p>
-          <button id="confirm-btn" class="btn-confirm hidden" onclick="confirmResult()" type="button">確認して次へ</button>
-        </div>
-      </div>
-
       <div class="scan-frame">
+        <!-- カメラ映像の上に重ねる。枠の外に置くと映像の下に隠れてしまう -->
+        <button id="mute-toggle" class="mute-btn" onclick="toggleMute()" aria-label="音声のオン・オフを切り替え" type="button">🔊</button>
         <div id="reader"></div>
       </div>
 
       <div class="header-bottom">
         <h1>スキャン中</h1>
         <p class="subtitle">枠内にQRコードを収めてください。連続で読み取れます。</p>
-        <button class="btn-secondary" onclick="openSearchView()">名前で検索して入場処理</button>
-        <button class="btn-secondary" onclick="reloadRoster()">名簿を再取得</button>
+        <!-- 2つを横並びにして下部の高さを抑える。スクロール量そのものを減らす狙い -->
+        <div class="btn-row">
+          <button class="btn-secondary" onclick="openSearchView()">名前で検索</button>
+          <button class="btn-secondary" onclick="reloadRoster()">名簿を再取得</button>
+        </div>
         <div class="brand">
           <span class="dot"></span>SECURE CHECK-IN
           <button id="pending-flush" class="pending-btn hidden" onclick="manualFlush()" type="button">未送信あり · 送信</button>
+        </div>
+      </div>
+
+      <!-- 照会結果。画面下部に固定で出すので、スクロール位置に関係なく必ず見える。
+           スキャン画面を隠すと一緒に消えるよう、この中に置いている -->
+      <div id="sheet-scrim" class="sheet-scrim" onclick="confirmResult()"></div>
+      <div id="result-sheet" class="result-sheet" role="dialog" aria-live="polite" aria-label="照会結果">
+        <div class="sheet-handle"></div>
+        <div id="loading" class="loading-row hidden">
+          <span class="spinner"></span> 照会中...
+        </div>
+        <div id="info">
+          <div class="result-label"><span class="pulse"></span>照会結果</div>
+          <p class="res-name" id="res-name"></p>
+          <p class="res-dept" id="res-dept"></p>
+          <div id="lottery-banner" class="lottery-banner hidden">🎉 おめでとうございます 🎉</div>
+          <p id="res-badge"></p>
+          <button id="confirm-btn" class="btn-confirm hidden" onclick="confirmResult()" type="button">確認して次へ</button>
         </div>
       </div>
     </div>
@@ -903,7 +972,23 @@
 
   // ---- 通知音（Web Audio APIでその場で合成。外部音源ファイルは一切使用しない） ----
   let audioCtx = null;
-  let isMuted = sessionStorage.getItem('qr_scanner_muted') === 'true';
+  /**
+   * sessionStorage は、プライベートブラウズやサイトデータの制限、
+   * 組織のポリシーなどでアクセスそのものが例外になることがある。
+   * 保護せずに読むとそこでスクリプト全体が停止し、画面が動かなくなるため、
+   * 必ずこの3つを通して読み書きする（localStorageの読み書きは既に保護済み）
+   */
+  function safeSessionGet(key) {
+    try { return sessionStorage.getItem(key); } catch (e) { return null; }
+  }
+  function safeSessionSet(key, value) {
+    try { sessionStorage.setItem(key, value); } catch (e) { /* 保存できなくても動作は継続させる */ }
+  }
+  function safeSessionRemove(key) {
+    try { sessionStorage.removeItem(key); } catch (e) { /* 同上 */ }
+  }
+
+  let isMuted = safeSessionGet('qr_scanner_muted') === 'true';
 
   function initAudio() {
     if (!audioCtx) {
@@ -955,7 +1040,7 @@
 
   function toggleMute() {
     isMuted = !isMuted;
-    sessionStorage.setItem('qr_scanner_muted', String(isMuted));
+    safeSessionSet('qr_scanner_muted', String(isMuted));
     updateMuteButton();
   }
 
@@ -1044,7 +1129,7 @@
 
       if (data.success) {
         authToken = data.token;
-        sessionStorage.setItem('auth_token', authToken);
+        safeSessionSet('auth_token', authToken);
 
         if (data.isProvisional) {
           // 仮アカウントの場合はスキャン画面に進ませず、設定画面へ強制遷移する
@@ -1219,7 +1304,7 @@
       if (data.success) {
         // 設定完了。仮IDと初期パスワードは無効になったので、ログイン画面に戻す
         authToken = null;
-        sessionStorage.removeItem('auth_token');
+        safeSessionRemove('auth_token');
         document.getElementById('setup-area').classList.add('hidden');
         document.getElementById('login-area').classList.remove('hidden');
         document.getElementById('login-id').value = newId; // 入力の手間を省く
@@ -1236,6 +1321,7 @@
   /* ---- 名前検索画面 ---- */
 
   async function openSearchView() {
+    closeSheet(); // 戻ってきたときに前の結果が開いたままにならないようにする
     document.getElementById('scan-area').classList.add('hidden');
     document.getElementById('search-area').classList.remove('hidden');
     document.getElementById('search-input').value = '';
@@ -1320,10 +1406,12 @@
     document.getElementById('info').classList.remove('hidden');
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('lottery-banner').classList.add('hidden');
+    document.getElementById('confirm-btn').classList.add('hidden');
     nameEl.classList.add('placeholder-row');
     nameEl.innerText = '名簿を再取得しています...';
     deptEl.innerText = '';
     badgeEl.innerHTML = '';
+    openSheet();
 
     const ok = await loadRoster(); // この端末の「照会済み」はloadRoster側で引き継がれる
 
@@ -1335,6 +1423,9 @@
       nameEl.classList.remove('placeholder-row');
       nameEl.innerHTML = '<span class="res-error">名簿を再取得できませんでした</span>';
     }
+
+    // 確認を求める表示ではないので、読める時間だけ出して自動で閉じる
+    autoCloseSheet(SHEET_AUTO_CLOSE_MS);
   }
 
   // 日本語入力の変換中は検索を走らせない（変換候補が確定する前に絞り込むと結果が安定しないため）
@@ -1454,6 +1545,7 @@
     isLookupInProgress = true;
     document.getElementById('info').classList.add('hidden');
     document.getElementById('loading').classList.remove('hidden');
+    openSheet();
 
     if (!rosterData) {
       scheduleResult(myGeneration, { ok: false, message: '名簿を読み込み中です。少し待ってから再度スキャンしてください' });
@@ -1531,6 +1623,33 @@
     }, RESULT_DELAY_MS);
   }
 
+  // ---- 結果パネルの開閉 ----
+  // パネルはposition:fixedなので、スクロール位置に関係なく同じ場所に出る
+
+  const SHEET_AUTO_CLOSE_MS = 4000; // エラー表示を自動で閉じるまでの時間
+  let sheetCloseTimer = null;
+
+  function openSheet() {
+    if (sheetCloseTimer) { clearTimeout(sheetCloseTimer); sheetCloseTimer = null; }
+    document.getElementById('result-sheet').classList.add('open');
+    document.getElementById('sheet-scrim').classList.add('open');
+  }
+
+  function closeSheet() {
+    if (sheetCloseTimer) { clearTimeout(sheetCloseTimer); sheetCloseTimer = null; }
+    document.getElementById('result-sheet').classList.remove('open');
+    document.getElementById('sheet-scrim').classList.remove('open');
+  }
+
+  /** 操作を待たずに閉じる。エラーや通知のように、確認を強制しない表示で使う */
+  function autoCloseSheet(ms) {
+    if (sheetCloseTimer) clearTimeout(sheetCloseTimer);
+    sheetCloseTimer = setTimeout(function () {
+      sheetCloseTimer = null;
+      closeSheet();
+    }, ms);
+  }
+
   function showResult(myGeneration, result) {
     if (myGeneration !== lookupGeneration) return; // 新しいスキャンに追い越された
 
@@ -1538,6 +1657,8 @@
     const deptEl = document.getElementById('res-dept');
     const badgeEl = document.getElementById('res-badge');
     const lotteryBanner = document.getElementById('lottery-banner');
+
+    const confirmBtn = document.getElementById('confirm-btn');
 
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('info').classList.remove('hidden');
@@ -1550,6 +1671,12 @@
       lotteryBanner.classList.add('hidden');
       playErrorSound();
       isLookupInProgress = false;
+
+      // エラーは確認を強制しない（従来どおり、そのまま次を読み取れる）。
+      // ただしパネルが開いたままだとカメラを覆うので、時間で閉じる
+      confirmBtn.innerText = '閉じる';
+      confirmBtn.classList.remove('hidden');
+      autoCloseSheet(SHEET_AUTO_CLOSE_MS);
       return;
     }
 
@@ -1576,7 +1703,8 @@
 
     // 照会できた場合は、確認ボタンを押すまで次のスキャンに進ませない
     awaitingConfirm = true;
-    document.getElementById('confirm-btn').classList.remove('hidden');
+    confirmBtn.innerText = '確認して次へ';
+    confirmBtn.classList.remove('hidden');
 
     isLookupInProgress = false;
   }
@@ -1587,14 +1715,17 @@
   function confirmResult() {
     awaitingConfirm = false;
     document.getElementById('confirm-btn').classList.add('hidden');
+    closeSheet();
 
-    // 前の人の結果が残っていると紛らわしいので、初期表示に戻す
-    const nameEl = document.getElementById('res-name');
-    nameEl.classList.add('placeholder-row');
-    nameEl.innerText = 'QRコードをスキャンしてください';
-    document.getElementById('res-dept').innerText = '';
-    document.getElementById('res-badge').innerHTML = '';
-    document.getElementById('lottery-banner').classList.add('hidden');
+    // 前の人の結果が残っていると紛らわしいので消しておく。
+    // パネルが閉じるアニメーションの最中に消すと中身が切り替わって見えるので、
+    // 閉じ終わってから消す
+    setTimeout(function () {
+      document.getElementById('res-name').innerText = '';
+      document.getElementById('res-dept').innerText = '';
+      document.getElementById('res-badge').innerHTML = '';
+      document.getElementById('lottery-banner').classList.add('hidden');
+    }, 260);
 
     // 直前に読んだQRがまだカメラに映っていても、すぐには再検出しないようにする
     lastScanTime = Date.now();
