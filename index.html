@@ -658,7 +658,7 @@
                onkeydown="if(event.key==='Enter') onLoginClick()">
       </div>
 
-      <button class="btn-primary" onclick="onLoginClick()">ログインしてスキャン開始</button>
+      <button id="login-btn" class="btn-primary" onclick="onLoginClick()">ログインしてスキャン開始</button>
       <div id="login-error" class="error-msg hidden"></div>
     </div>
 
@@ -1166,6 +1166,10 @@
   });
 
   function onLoginClick() {
+    // 待ち時間中はボタンを無効化してあるが、パスワード欄のEnterキーからも
+    // 呼ばれるため、ここでも確認する
+    if (retryUntil && Date.now() < retryUntil) return;
+
     const id = document.getElementById('login-id').value;
     const pw = document.getElementById('login-pw').value;
 
@@ -1236,7 +1240,8 @@
         document.getElementById('auth-overlay').classList.add('hidden'); // 名簿が揃った、カメラ画面を表示
       } else {
         authFailed = true;
-        stopScannerAndReturnToLogin(data.message);
+        // 連続失敗時はサーバーが待ち秒数を返す。待ち時間はここで消費する
+        stopScannerAndReturnToLogin(data.message, data.retryAfterSec);
       }
     } catch (err) {
       // 切り分け用：実際のエラー内容をコンソールに出す
@@ -1246,7 +1251,7 @@
     }
   }
 
-  function stopScannerAndReturnToLogin(message) {
+  function stopScannerAndReturnToLogin(message, retryAfterSec) {
     if (scannerInstance) {
       scannerInstance.clear().catch(() => {});
       scannerInstance = null;
@@ -1279,12 +1284,76 @@
     document.getElementById('scan-area').classList.add('hidden');
     document.getElementById('login-area').classList.remove('hidden');
     showLoginError(message);
+    startRetryCountdown(retryAfterSec); // 指定が無ければボタンを戻すだけ
   }
 
   function showLoginError(message) {
     const errEl = document.getElementById('login-error');
     errEl.textContent = message;
     errEl.classList.remove('hidden');
+  }
+
+  /* ==========================================================
+   * 連続失敗後の待ち時間
+   * ==========================================================
+   * サーバー側ではsleepせず即座に返してもらい、待ち時間はここで消費する。
+   * GASのUtilities.sleep()は実行スロットを解放しないため、サーバー側で
+   * 待つと受付端末のスキャンまで通らなくなる（Code_scanner.gsのlogin参照）。
+   *
+   * 残り時間は「終了時刻」で保持する。カウンタを減らしていく方式だと、
+   * 端末がバックグラウンドに回ったときにタイマーがスロットルされ、
+   * 実際の経過時間とずれてしまう。
+   *
+   * 待ち時間の正はサーバー側にあるので、画面を再読み込みされても
+   * 問題にならない（次の試行がサーバー側で安く弾かれる）
+   * ========================================================== */
+  const LOGIN_BTN_LABEL = 'ログインしてスキャン開始';
+  let retryUntil = 0;
+  let retryTimer = null;
+
+  function startRetryCountdown(seconds) {
+    if (retryTimer) {
+      clearInterval(retryTimer);
+      retryTimer = null;
+    }
+
+    const sec = Number(seconds);
+    if (!sec || sec <= 0) {
+      retryUntil = 0;
+      resetLoginButton();
+      return;
+    }
+
+    retryUntil = Date.now() + sec * 1000;
+    renderRetryCountdown();
+    retryTimer = setInterval(renderRetryCountdown, 250);
+  }
+
+  function renderRetryCountdown() {
+    const btn = document.getElementById('login-btn');
+    const remainMs = retryUntil - Date.now();
+
+    if (remainMs <= 0) {
+      retryUntil = 0;
+      if (retryTimer) {
+        clearInterval(retryTimer);
+        retryTimer = null;
+      }
+      resetLoginButton();
+      return;
+    }
+
+    const remainSec = Math.ceil(remainMs / 1000);
+    btn.disabled = true;
+    btn.textContent = remainSec >= 60
+      ? 'あと ' + Math.ceil(remainSec / 60) + ' 分お待ちください'
+      : 'あと ' + remainSec + ' 秒';
+  }
+
+  function resetLoginButton() {
+    const btn = document.getElementById('login-btn');
+    btn.disabled = false;
+    btn.textContent = LOGIN_BTN_LABEL;
   }
 
   function startScanner() {
