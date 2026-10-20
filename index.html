@@ -508,10 +508,22 @@
   .btn-confirm:active{ transform: scale(0.98); }
 
   /* 未送信があるときだけ出る小さな送信ボタン。件数までは出さない */
+  /* ログアウト完了など、エラーではない通知。枠は同じで色だけ変える */
+  .error-msg.is-info{
+    background: rgba(31,138,95,0.08);
+    border-color: rgba(31,138,95,0.28);
+    color: var(--success);
+  }
+  .error-msg.is-info::before{
+    content: "\2713"; /* ✓ */
+    background: var(--success);
+  }
+
   .pending-btn{
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    white-space: nowrap;
     margin-left: 10px;
     padding: 3px 9px;
     border: 1px solid rgba(217,162,27,0.55);
@@ -555,6 +567,18 @@
     transition: background .12s ease;
   }
   .btn-secondary:hover{ background: var(--accent-soft); }
+
+  /* ログアウトだけ色を分ける。
+     上の2つ（名前で検索・名簿を再取得）は受付作業の中で使うボタン、
+     こちらは作業を終えるボタンで性質が違う。
+     同じ見た目のまま並べると、押し間違いにも押し忘れにもつながる。
+     塗りつぶしにしないのは、スキャン作業中に視線を奪わないため */
+  .btn-logout{
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+  .btn-logout:hover{ background: rgba(192,57,43,0.07); }
+
 
   #search-input{
     width: 100%;
@@ -715,6 +739,8 @@
           <button class="btn-secondary" onclick="openSearchView()">名前で検索</button>
           <button class="btn-secondary" onclick="reloadRoster()">名簿を再取得</button>
         </div>
+        <!-- シフト上がりの操作。他のボタンと同じ大きさにして見落とされないようにする -->
+        <button id="logout-btn" class="btn-secondary btn-logout" onclick="onLogoutClick()" type="button">ログアウト</button>
         <div class="brand">
           <span class="dot"></span>SECURE CHECK-IN
           <button id="pending-flush" class="pending-btn hidden" onclick="manualFlush()" type="button">未送信あり · 送信</button>
@@ -911,6 +937,58 @@
     } else {
       updatePendingIndicator();
     }
+  }
+
+  /* ==========================================================
+   * ログアウト
+   * ==========================================================
+   * シフト上がりの操作をここに集約する。
+   *
+   * 未送信のキューは pagehide の sendBeacon と localStorage で
+   * 二重に保護してあるが、復元が走るのは「次にこの端末でログインしたとき」
+   * なので、そのまま端末を置いて帰られると記録が取り残される。
+   * ログアウトを押してもらえば、その場で確実に送り切れる。
+   *
+   * 「未送信を送信してください」と促すより、
+   * 「上がるときはログアウト」の方が行動として分かりやすいため、
+   * こちらを正規の手順にする
+   * ========================================================== */
+  async function onLogoutClick() {
+    const btn = document.getElementById('logout-btn');
+    if (!btn || btn.disabled) return;
+
+    // 未送信があれば、先に送り切ってからログアウトする
+    if (pendingCheckIns.length) {
+      btn.disabled = true;
+      btn.textContent = '送信中...';
+      await flushCheckInQueue();
+      btn.disabled = false;
+      btn.textContent = 'ログアウト';
+    }
+
+    // 送れなくてもログアウトは止めない。
+    //
+    // 確認ダイアログで引き止めても、待っている間に通信が戻る保証はなく、
+    // 「キャンセル」を選んでも送信できる状態にはならない。
+    // 判断を求めるだけスタッフへの説明が増えるので、
+    // 代わりに「次に何をすればよいか」をメッセージで伝える
+    const left = pendingCheckIns.length;
+    document.getElementById('login-pw').value = ''; // IDは残す（個人端末のため）
+
+    // stopScannerAndReturnToLogin() の中でも flushCheckInQueue() が呼ばれる。
+    // トークンを先に捨てると、その最後の試行が必ず認証エラーになって無駄になるため、
+    // 画面を戻してから破棄する。
+    // flushCheckInQueue() は最初のawaitに入る前に token を読み終えているので、
+    // 直後に null にしても送信中のリクエストには影響しない
+    stopScannerAndReturnToLogin(
+      left ? 'ログアウトしました（未送信 ' + left + '件）。通信が回復したら、' +
+             'この端末でもう一度ログインすると送信されます'
+           : 'ログアウトしました',
+      0,
+      left === 0 // 未送信が残っていれば注意として赤、無ければ完了として緑で出す
+    );
+
+    authToken = null;
   }
 
   function enqueueCheckIn(id) {
@@ -1212,7 +1290,8 @@
 
       if (data.success) {
         authToken = data.token;
-        safeSessionSet('auth_token', authToken);
+        // sessionStorageには保存しない。
+        // 読み戻す処理が無いので保存しても使われず、端末に資格情報が残るだけになる
 
         if (data.isProvisional) {
           // 仮アカウントの場合はスキャン画面に進ませず、設定画面へ強制遷移する
@@ -1251,7 +1330,7 @@
     }
   }
 
-  function stopScannerAndReturnToLogin(message, retryAfterSec) {
+  function stopScannerAndReturnToLogin(message, retryAfterSec, isInfo) {
     if (scannerInstance) {
       scannerInstance.clear().catch(() => {});
       scannerInstance = null;
@@ -1283,13 +1362,14 @@
     document.getElementById('auth-overlay').classList.add('hidden'); // 次回のためにリセット
     document.getElementById('scan-area').classList.add('hidden');
     document.getElementById('login-area').classList.remove('hidden');
-    showLoginError(message);
+    showLoginError(message, isInfo);
     startRetryCountdown(retryAfterSec); // 指定が無ければボタンを戻すだけ
   }
 
-  function showLoginError(message) {
+  function showLoginError(message, isInfo) {
     const errEl = document.getElementById('login-error');
     errEl.textContent = message;
+    errEl.classList.toggle('is-info', !!isInfo); // ログアウト完了など、エラーでない場合
     errEl.classList.remove('hidden');
   }
 
@@ -1638,7 +1718,7 @@
           '<div class="r-sub"></div>' +
         '</div>' +
         '<span class="chip ' + (p.checked ? 'chip-checked' : 'chip-unchecked') + '">' +
-          (p.checked ? '照会済み' : '未照会') +
+          (p.checked ? '入場済み' : '未入場') +
         '</span>';
       // 名前・メールはtextContentで入れることでHTMLとして解釈されないようにする
       item.querySelector('.r-name').textContent = p.name;
