@@ -579,6 +579,31 @@
   }
   .btn-finish:hover{ background: rgba(192,57,43,0.07); }
 
+  /* ---- 接続先の表示 ---- */
+  .target-line{
+    margin: 0 0 18px;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-sunken);
+    color: var(--text-dim);
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+  .target-line .target-name{
+    color: var(--text);
+    font-weight: 600;
+  }
+  /* 日付が今日と一致しないとき。
+     切り替えは人が行うので忘れることがある。スタッフが変更できなくても、
+     見えていれば「画面が違う」と気づける */
+  .target-line.is-warn{
+    border-color: var(--danger);
+    background: rgba(192,57,43,0.06);
+    color: var(--danger);
+  }
+  .target-line.is-warn .target-name{ color: var(--danger); }
+
   /* ---- 端末に残ったログインから再開する画面 ---- */
   .resume-card{
     background: var(--surface-sunken);
@@ -690,6 +715,10 @@
       <h1>QRコード入場券照会</h1>
       <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
 
+      <!-- 接続先の表示。切り替えは管理シートでのみ行うので、ここは表示専用。
+           日付が今日と一致しない場合は警告の見た目になる -->
+      <div id="target-line" class="target-line">接続先を確認中…</div>
+
       <!-- この端末にログインが残っているときだけ表示する。
            カメラと音の初期化はユーザー操作の中で行う必要があるため、
            自動では再開せず、必ず1タップを挟む -->
@@ -719,37 +748,11 @@
         <button id="login-btn" class="btn-primary" onclick="onLoginClick()">ログインしてスキャン開始</button>
       </div>
       <div id="login-error" class="error-msg hidden"></div>
+      <!-- 別の接続先の未送信が端末に残っている場合の注意。
+           ログインの結果とは独立なので、別の枠に出す -->
+      <div id="orphan-notice" class="error-msg hidden"></div>
     </div>
 
-    <!-- 仮アカウントの初回設定画面 -->
-    <div id="setup-area" class="hidden">
-      <h1>アカウントの設定</h1>
-      <p class="subtitle">初回ログインのため、ご自身の情報を設定してください。設定後、仮IDと初期パスワードは使用できなくなります。</p>
-
-      <div class="field">
-        <label for="setup-name">名前</label>
-        <input id="setup-name" type="text" placeholder="受付スタッフの氏名" autocomplete="name">
-      </div>
-      <div class="field">
-        <label for="setup-id">新しいID</label>
-        <input id="setup-id" type="text" placeholder="半角英数字4文字以上" autocomplete="off"
-               inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
-      </div>
-      <div class="field">
-        <label for="setup-pw">新しいパスワード</label>
-        <input id="setup-pw" type="password" placeholder="半角英数字8文字以上" autocomplete="new-password"
-               inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false">
-      </div>
-      <div class="field">
-        <label for="setup-pw2">パスワード（確認）</label>
-        <input id="setup-pw2" type="password" placeholder="もう一度入力" autocomplete="new-password"
-               inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false"
-               onkeydown="if(event.key==='Enter') onSetupSubmit()">
-      </div>
-
-      <button class="btn-primary" onclick="onSetupSubmit()">設定する</button>
-      <div id="setup-error" class="error-msg hidden"></div>
-    </div>
 
     <!-- スキャン画面：照会結果を最上部に固定表示、タイトル・ブランドは下部 -->
     <div id="scan-area" class="hidden">
@@ -817,7 +820,7 @@
   </div>
 
 <script>
-  const GAS_URL = 'https://script.google.com/macros/s/AKfycbw7wPLL-AJHJrlnXsg9MgaS3mG5CD3ZoWoIj-tMMr0afF3j8hl4PgwCc5oBuvpJJf09/exec'; // ← GASを新しくデプロイするたびに、ここを実際の/execURLに書き換える
+  const GAS_URL = 'https://script.google.com/macros/s/AKfycbwdnQbHGQk0MNM1xNpZ2Qc4K8FRZI_UMMIyeZZFmaI7mJr2d45wo5kZSLDdEKemXC-I/exec'; // ← GASを新しくデプロイするたびに、ここを実際の/execURLに書き換える
   let authToken = null;
   let scannerInstance = null;
   let authFailed = false;
@@ -901,15 +904,15 @@
    * ========================================================== */
   const QUEUE_FLUSH_SIZE = 10;            // この件数に達したら送信する
   const QUEUE_FLUSH_INTERVAL_MS = 120000; // 溜まったままでも、この間隔で必ず送信する（2分）
-  const QUEUE_STORAGE_KEY = 'qr_pending_checkins';
-
   let pendingCheckIns = [];   // 未送信のID
   let isFlushingQueue = false;
   let flushTimer = null;
 
   function loadPendingFromStorage() {
+    const key = queueKey();
+    if (!key) return;
     try {
-      const saved = localStorage.getItem(QUEUE_STORAGE_KEY);
+      const saved = localStorage.getItem(key);
       if (!saved) return;
 
       const parsed = JSON.parse(saved);
@@ -924,12 +927,19 @@
     }
   }
 
-  function savePendingToStorage() {
+  /**
+   * キューを保存する。
+   * keyOverride は送信中に接続先が切り替わった場合のためにある。
+   * 送信を始めた時点のキーに戻さないと、別のイベントのキューに混ざる
+   */
+  function savePendingToStorage(keyOverride) {
+    const key = keyOverride || queueKey();
+    if (!key) return;
     try {
       if (pendingCheckIns.length) {
-        localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(pendingCheckIns));
+        localStorage.setItem(key, JSON.stringify(pendingCheckIns));
       } else {
-        localStorage.removeItem(QUEUE_STORAGE_KEY);
+        localStorage.removeItem(key);
       }
     } catch (e) {
       // 保存できなくても動作自体は継続させる
@@ -1049,6 +1059,25 @@
     }
   }
 
+  /* ==========================================================
+   * 接続先が切り替わったとき
+   * ==========================================================
+   * サーバーが targetChanged を返したら、このセッションはもう使えない。
+   *
+   * 順番が重要。先に clearSession() を呼んで「古い接続先の」保存を消し、
+   * そのあとで activeTargetKey を新しい値に入れ替える。
+   * 逆にすると、新しい接続先のキーを消して古い保存が残る
+   * ========================================================== */
+  let targetChangedNotice = null;
+
+  function handleTargetChanged(data) {
+    clearSession();
+    authToken = null;
+    applyTargetInfo(data);
+    targetChangedNotice = '接続先が「' + (data.targetName || '') + '」に切り替わりました。' +
+                          'パスワードは同じものが使えます。';
+  }
+
   /**
    * 溜まったチェックインをまとめて送信する。
    * 送信に失敗した場合はキューに戻し、次の機会に再送する。
@@ -1059,9 +1088,13 @@
     isFlushingQueue = true;
     // 送信中に新たなスキャンがあってもよいよう、対象を切り出しておく
     const sending = pendingCheckIns.slice();
+    // 送信中に接続先が切り替わっても、戻す先を間違えないよう控えておく
+    const keyAtStart = queueKey();
     pendingCheckIns = [];
-    savePendingToStorage();
+    savePendingToStorage(keyAtStart);
     updatePendingIndicator();
+
+    let switchData = null;
 
     try {
       const data = await postToGas({ action: 'bulkCheckIn', token: authToken, ids: sending });
@@ -1070,15 +1103,30 @@
         // サーバー側で拒否された場合も、記録を失わないようキューに戻す
         pendingCheckIns = sending.concat(pendingCheckIns);
         console.error('[チェックイン記録失敗]', data.message);
-        // トークンが通らなくなっていたら保存を捨てる。
-        // 残したままだと、起動のたびに通らないトークンで再開を試みてしまう
-        if (String(data.message || '').indexOf('認証エラー') === 0) clearSession();
+
+        if (data.targetChanged) {
+          // この分は切り替え前の接続先のもの。新しい接続先には持ち込まない
+          switchData = data;
+        } else if (String(data.message || '').indexOf('認証エラー') === 0) {
+          // トークンが通らなくなっていたら保存を捨てる。
+          // 残したままだと、起動のたびに通らないトークンで再開を試みてしまう
+          clearSession();
+        }
       }
     } catch (err) {
       pendingCheckIns = sending.concat(pendingCheckIns);
       console.error('[チェックイン送信失敗]', err.name, err.message);
     } finally {
-      savePendingToStorage();
+      // 必ず送信開始時のキーへ戻す
+      savePendingToStorage(keyAtStart);
+
+      if (switchData) {
+        // 元の接続先のキーに保存した上で、メモリからは落とす。
+        // 残しておくと、次の送信で新しい接続先へ流れてしまう
+        pendingCheckIns = [];
+        handleTargetChanged(switchData);
+      }
+
       updatePendingIndicator();
       isFlushingQueue = false;
     }
@@ -1158,14 +1206,127 @@
    * 入力欄に戻しておくと、再ログイン時の入力がパスワードだけになる。
    * セッションが切れても消さない
    * ========================================================== */
-  const SESSION_KEY = 'qr_auth_session';
   const LAST_ID_KEY = 'qr_last_login_id';
-  // Code_scanner.gs の TOKEN_LIFETIME_MS と揃える
+  // Code_scanner の TOKEN_LIFETIME_MS と揃える
   const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
-  function saveSession(token, name) {
+  /* ==========================================================
+   * 接続先（どのイベントの名簿を見るか）
+   * ==========================================================
+   * 決めるのはサーバー（管理シートの「接続先」シートのB1）で、
+   * 端末側は指定できない。ここにあるのは表示と、
+   * localStorageのキーを接続先ごとに分けるための値だけ。
+   *
+   * 【キーを接続先ごとに分ける理由】
+   * localStorageはオリジン単位で、パスでは分かれない。
+   * キーを固定にすると、11/14で溜めた未送信のキューが
+   * 11/15のセッションで復元されて、11/15の名簿に書き込まれてしまう。
+   * トークンに接続先を埋めて守っているものが、ここから裏返る
+   * ========================================================== */
+  let activeTargetKey = null;
+  let activeTargetName = null;
+  let activeTargetDateMatches = null;
+
+  // 接続先が分かるまでは null を返す。その間は保存を読み書きしない
+  function sessionKey() {
+    return activeTargetKey ? ('qr_' + activeTargetKey + '_auth_session') : null;
+  }
+  function queueKey() {
+    return activeTargetKey ? ('qr_' + activeTargetKey + '_pending_checkins') : null;
+  }
+
+  function applyTargetInfo(data) {
+    activeTargetKey = data.targetKey || null;
+    activeTargetName = data.targetName || null;
+    activeTargetDateMatches =
+      (typeof data.dateMatches === 'boolean') ? data.dateMatches : null;
+    renderTargetLine();
+  }
+
+  /**
+   * 接続先の行を描く。
+   * 名前は管理シートに人が書いた値なので、textContentで入れる
+   */
+  function renderTargetLine(overrideMessage) {
+    const el = document.getElementById('target-line');
+    el.textContent = '';
+    el.classList.remove('is-warn');
+
+    if (overrideMessage) { el.textContent = overrideMessage; return; }
+    if (!activeTargetName) { el.textContent = '接続先を確認中…'; return; }
+
+    const name = document.createElement('span');
+    name.className = 'target-name';
+    name.textContent = activeTargetName;
+
+    el.appendChild(document.createTextNode('接続先: '));
+    el.appendChild(name);
+
+    if (activeTargetDateMatches === false) {
+      el.classList.add('is-warn');
+      el.appendChild(document.createTextNode(
+        '（日付が今日と一致していません。管理者に確認してください）'));
+    }
+  }
+
+  /**
+   * 接続先を取り、ログイン画面を描き直す。
+   * 失敗しても入力欄からのログインはできる（接続先はサーバーが決めるため）
+   */
+  async function loadTargetInfo() {
     try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify({
+      const data = await postToGas({ action: 'targetInfo' }, null, 1);
+      if (data.success) {
+        applyTargetInfo(data);
+        refreshLoginView();   // 接続先が分かってから、保存の有無に応じて出し直す
+        renderOrphanNotice();
+        return;
+      }
+      renderTargetLine(data.message);
+    } catch (err) {
+      console.error('[接続先の取得失敗]', err.name, err.message);
+      renderTargetLine('接続先を確認できませんでした。通信を確認してください');
+    }
+  }
+
+  /**
+   * 別の接続先の未送信が端末に残っていないか調べて知らせる。
+   * 黙って消すと記録が失われ、黙って送ると別のイベントに書き込まれるので、
+   * どちらもせず人に判断を渡す
+   */
+  function renderOrphanNotice() {
+    const el = document.getElementById('orphan-notice');
+    el.classList.add('hidden');
+    if (!activeTargetKey) return;
+
+    const found = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        const m = key && key.match(/^qr_(.+)_pending_checkins$/);
+        if (!m || m[1] === activeTargetKey) continue;
+        const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+        if (Array.isArray(parsed) && parsed.length) {
+          found.push({ target: m[1], count: parsed.length });
+        }
+      }
+    } catch (e) {
+      return; // 読めない環境では出さない
+    }
+    if (!found.length) return;
+
+    const total = found.reduce(function (a, b) { return a + b.count; }, 0);
+    el.textContent = 'この端末に、別の接続先の未送信が' + total + '件残っています（' +
+      found.map(function (f) { return f.target; }).join('・') +
+      '）。管理者に連絡してください。';
+    el.classList.remove('hidden');
+  }
+
+  function saveSession(token, name) {
+    const key = sessionKey();
+    if (!key) return;
+    try {
+      localStorage.setItem(key, JSON.stringify({
         token: token,
         name: name || '',
         savedAt: Date.now()
@@ -1176,8 +1337,10 @@
   }
 
   function loadSession() {
+    const key = sessionKey();
+    if (!key) return null;
     try {
-      const raw = localStorage.getItem(SESSION_KEY);
+      const raw = localStorage.getItem(key);
       if (!raw) return null;
 
       const saved = JSON.parse(raw);
@@ -1197,7 +1360,9 @@
   }
 
   function clearSession() {
-    try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* 同上 */ }
+    const key = sessionKey();
+    if (!key) return;
+    try { localStorage.removeItem(key); } catch (e) { /* 同上 */ }
   }
 
   function saveLastLoginId(id) {
@@ -1458,13 +1623,20 @@
 
       if (data.success) {
         authToken = data.token;
+        // ログインの応答で接続先が確定する。saveSession より前に入れること
+        // （保存のキーが接続先ごとに分かれているため）
+        applyTargetInfo(data);
         // 再読み込みでもログインを維持する。詳しくは saveSession() の上のコメント
         saveSession(data.token, data.name);
         saveLastLoginId(id);
 
         if (data.isProvisional) {
-          // 仮アカウントの場合はスキャン画面に進ませず、設定画面へ強制遷移する
-          goToSetupView();
+          // 仮アカウントの本登録は、この画面から外してある。
+          // スキャナに管理シートへの書き込み権限を持たせないためで、
+          // 本登録は管理者が管理ツール側で行う
+          authFailed = true;
+          stopScannerAndReturnToLogin(
+            'このアカウントは初期設定が済んでいません。管理者に連絡してください');
           return;
         }
 
@@ -1474,7 +1646,7 @@
 
         if (!ok) {
           authFailed = true;
-          stopScannerAndReturnToLogin('名簿を取得できませんでした。もう一度お試しください');
+          finishWithRosterFailure();
           return;
         }
 
@@ -1544,7 +1716,7 @@
       authFailed = true;
       // 認証エラーだった場合、loadRoster() が既に保存を捨てている。
       // 通信エラーなら保存は生きているので、戻った画面でもう一度「再開」を押せる
-      stopScannerAndReturnToLogin('名簿を取得できませんでした。もう一度お試しください');
+      finishWithRosterFailure();
       return;
     }
 
@@ -1577,6 +1749,20 @@
     document.getElementById('login-id').focus();
   }
 
+  /**
+   * 名簿が取れずにログイン画面へ戻すときの文面を決める。
+   * 接続先の切り替えは異常ではないので、緑（完了）で出す
+   */
+  function finishWithRosterFailure() {
+    if (targetChangedNotice) {
+      const notice = targetChangedNotice;
+      targetChangedNotice = null;
+      stopScannerAndReturnToLogin(notice, 0, true);
+      return;
+    }
+    stopScannerAndReturnToLogin('名簿を取得できませんでした。もう一度お試しください');
+  }
+
   function stopScannerAndReturnToLogin(message, retryAfterSec, isInfo) {
     if (scannerInstance) {
       scannerInstance.clear().catch(() => {});
@@ -1604,7 +1790,6 @@
 
     awaitingConfirm = false;
     document.getElementById('confirm-btn').classList.add('hidden');
-    document.getElementById('setup-area').classList.add('hidden');
     document.getElementById('search-area').classList.add('hidden');
     document.getElementById('auth-overlay').classList.add('hidden'); // 次回のためにリセット
     document.getElementById('scan-area').classList.add('hidden');
@@ -1612,6 +1797,7 @@
     // セッションが残っていれば「再開」、消えていれば通常のログイン画面を出す。
     // 通信エラーで戻ってきた場合は保存が生きているので、入力し直さずに再開できる
     refreshLoginView();
+    renderOrphanNotice(); // 切り替え直後は、前の接続先のキューが取り残される
     showLoginError(message, isInfo);
     startRetryCountdown(retryAfterSec); // 指定が無ければボタンを戻すだけ
   }
@@ -1712,90 +1898,6 @@
     });
   }
 
-  /* ---- 仮アカウントの初回設定 ---- */
-
-  function goToSetupView() {
-    // 起動済みのカメラを止めてから設定画面へ切り替える
-    if (scannerInstance) {
-      scannerInstance.clear().catch(() => {});
-      scannerInstance = null;
-    }
-    document.getElementById('auth-overlay').classList.add('hidden');
-    document.getElementById('scan-area').classList.add('hidden');
-    document.getElementById('login-area').classList.add('hidden');
-    document.getElementById('setup-error').classList.add('hidden');
-    document.getElementById('setup-name').value = '';
-    document.getElementById('setup-id').value = '';
-    document.getElementById('setup-pw').value = '';
-    document.getElementById('setup-pw2').value = '';
-    document.getElementById('setup-area').classList.remove('hidden');
-  }
-
-  function showSetupError(message) {
-    const el = document.getElementById('setup-error');
-    el.textContent = message;
-    el.classList.remove('hidden');
-  }
-
-  async function onSetupSubmit() {
-    const newName = document.getElementById('setup-name').value.trim();
-    const newId = document.getElementById('setup-id').value.trim();
-    const pw1 = document.getElementById('setup-pw').value;
-    const pw2 = document.getElementById('setup-pw2').value;
-
-    document.getElementById('setup-error').classList.add('hidden');
-
-    if (!newName) {
-      showSetupError('名前を入力してください');
-      return;
-    }
-    if (!/^[A-Za-z0-9]+$/.test(newId)) {
-      showSetupError('IDは半角英数字のみで入力してください');
-      return;
-    }
-    if (newId.length < 4) {
-      showSetupError('IDは4文字以上にしてください');
-      return;
-    }
-    if (!/^[A-Za-z0-9]+$/.test(pw1)) {
-      showSetupError('パスワードは半角英数字のみで入力してください（日本語入力がオンになっていないか確認してください）');
-      return;
-    }
-    if (pw1.length < 8) {
-      showSetupError('パスワードは8文字以上にしてください');
-      return;
-    }
-    if (pw1 !== pw2) {
-      showSetupError('パスワードが一致しません');
-      return;
-    }
-
-    try {
-      const data = await postToGas({
-        action: 'setupAccount',
-        token: authToken,
-        newName: newName,
-        newId: newId,
-        newPassword: pw1
-      });
-
-      if (data.success) {
-        // 設定完了。仮IDと初期パスワードは無効になったので、ログイン画面に戻す
-        authToken = null;
-        safeSessionRemove('auth_token');
-        document.getElementById('setup-area').classList.add('hidden');
-        document.getElementById('login-area').classList.remove('hidden');
-        document.getElementById('login-id').value = newId; // 入力の手間を省く
-        document.getElementById('login-pw').value = '';
-        showLoginError('設定が完了しました。新しいIDとパスワードでログインしてください');
-      } else {
-        showSetupError(data.message);
-      }
-    } catch (err) {
-      showSetupError('通信エラーが発生しました');
-    }
-  }
-
   /* ---- 名前検索画面 ---- */
 
   async function openSearchView() {
@@ -1860,6 +1962,13 @@
         lastRosterFetchAt = Date.now();
         if (onStatus) onStatus(rosterData.length + '件から検索できます');
         return true;
+      }
+
+      // 接続先が切り替わった場合。通常の認証エラーと文面を分ける
+      if (data.targetChanged) {
+        handleTargetChanged(data);
+        if (onStatus) onStatus('接続先が切り替わりました');
+        return false;
       }
 
       // 認証エラーなら、保存してあるトークンは既に通らない。
@@ -2221,11 +2330,15 @@
   /* ==========================================================
    * 起動時の処理
    * ==========================================================
-   * この端末にログインが残っていれば「スキャンを再開」を、
-   * 残っていなければ通常のログイン画面を出す。
+   * 先に入力欄を出してから、接続先を取りに行く。
+   * 接続先が分かるまで保存の読み出しができない（キーが接続先ごとなので）が、
+   * 待たせると「開いたのに何も出ない」時間ができるため、
+   * まず入力欄を見せて、分かった時点で「スキャンを再開」に差し替える。
+   *
    * このscriptはbodyの末尾にあるので、DOMは揃っている
    * ========================================================== */
   refreshLoginView();
+  loadTargetInfo();
 </script>
 </body>
 </html>
