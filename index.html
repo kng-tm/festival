@@ -716,7 +716,7 @@
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
       <h1>QRコード入場券照会</h1>
-      <p class="subtitle">配布したアカウントでログインし、QRコードをスキャンしてください。</p>
+      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
       <!-- 接続先の表示。切り替えは管理シートでのみ行うので、ここは表示専用 -->
       <div id="target-line" class="target-line">接続先を確認中…</div>
@@ -844,7 +844,21 @@
 
   // 名簿にないIDを読んだとき、当日追加された人の可能性があるため名簿を取り直す。
   // ただし無関係なQRコードを読むたびに取りに行かないよう、歯止めをかける
-  const ROSTER_REFETCH_COOLDOWN_MS = 30000; // 前回の取り直しからこの時間は再取得しない
+  // 前回の名簿取得から、この時間は取り直しをしない。
+  //
+  // 【SCAN_COOLDOWN_MS 以下にしておくこと】
+  // これより長いと「もう一度読み取ってください」と案内しても、
+  // スキャナが読み直しを許す時点では取り直しが弾かれたままになり、
+  // 案内が成立しない。値を直接書かずに参照しているのはそのため。
+  //
+  // 現実的な取り直し回数は、この値をいくら伸ばしても大きく変わらない。
+  // 同じIDの繰り返しは refetchedForIds が止めていて、
+  // 当日追加の人は固まって来るので1回の取り直しがまとめて解決する
+  // （10人が同時に登録 → 1人目の取り直しで全員が名簿に入る）。
+  // 取り直し中は isLookupInProgress で次の読み取りも止まる。
+  // つまりこの値が抑えているのは「異なる未知QRを連続で読む」場合だけで、
+  // 受付の現場では起きない
+  const ROSTER_REFETCH_COOLDOWN_MS = SCAN_COOLDOWN_MS;
   let lastRosterFetchAt = 0;
   const refetchedForIds = {}; // 一度取り直して見つからなかったIDは、二度と取りに行かない
 
@@ -2234,11 +2248,27 @@
       return;
     }
 
-    scheduleResult(myGeneration, { ok: false, message: '対象者が見つかりません' });
+    scheduleResult(myGeneration, { ok: false, message: notFoundMessage_(qrId) });
   }
 
   function findInRoster(qrId) {
     return rosterData.find(p => String(p.id) === String(qrId));
+  }
+
+  /**
+   * 「対象者が見つかりません」に、次に取るべき行動を添える。
+   *
+   *   取り直し済み … 何度読んでも結果は変わらないので、名前検索へ誘導する。
+   *                  名前検索を開くと名簿を取り直し、同時に refetchedForIds も
+   *                  白紙に戻るので、案内がそのまま復旧操作にもなっている
+   *   クールダウン中 … もう一度読めば取り直しが走る。
+   *                    ROSTER_REFETCH_COOLDOWN_MS が SCAN_COOLDOWN_MS 以下
+   *                    なので、この案内は必ず成立する
+   */
+  function notFoundMessage_(qrId) {
+    return refetchedForIds[String(qrId)]
+      ? '対象者が見つかりません（名前で検索してください）'
+      : '対象者が見つかりません（もう一度読み取ってください）';
   }
 
   /** 判定を確定し、チェックインを送信キューに積む */
@@ -2280,7 +2310,7 @@
       showResult(myGeneration, commitCheckIn(person));
     } else {
       refetchedForIds[String(qrId)] = true; // 取り直しても居なかったので、もう取りに行かない
-      showResult(myGeneration, { ok: false, message: '対象者が見つかりません' });
+      showResult(myGeneration, { ok: false, message: notFoundMessage_(qrId) });
     }
   }
 
