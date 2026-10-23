@@ -242,6 +242,12 @@
     height: 100% !important;
     object-fit: cover;
   }
+  /* インカメラのときだけ左右を反転する（applyMirror_ が付け外しする）。
+     反転するのは video だけ。#reader ごと反転すると、上に重なっている
+     枠（qr-shaded-region）やボタンの文字まで裏返る */
+  #reader__scan_region video.is-mirrored{
+    transform: scaleX(-1);
+  }
   #reader img{ display:none; }
 
   /* html5-qrcode標準の白い縁取りを、デザインのアクセント色に変更 */
@@ -594,15 +600,12 @@
     color: var(--text);
     font-weight: 600;
   }
-  /* 日付が今日と一致しないとき。
-     切り替えは人が行うので忘れることがある。スタッフが変更できなくても、
-     見えていれば「画面が違う」と気づける */
-  .target-line.is-warn{
-    border-color: var(--danger);
-    background: rgba(192,57,43,0.06);
-    color: var(--danger);
-  }
-  .target-line.is-warn .target-name{ color: var(--danger); }
+  /* 日付の不一致をここで警告することはしない。
+     スタッフは接続先を変更できないので、警告を出しても取れる行動がなく、
+     不安にさせるだけになる。
+     接続先の名前が出ていれば「画面が11/14になっている」ことは分かるので、
+     気づくための手がかりは残っている。
+     切り替え忘れの警告は、管理シートのD1・管理ツール・毎朝の通知で出す */
 
   /* ---- 端末に残ったログインから再開する画面 ---- */
   .resume-card{
@@ -713,10 +716,9 @@
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
       <h1>QRコード入場券照会</h1>
-      <p class="subtitle">配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
+      <p class="subtitle">配布したアカウントでログインし、QRコードをスキャンしてください。</p>
 
-      <!-- 接続先の表示。切り替えは管理シートでのみ行うので、ここは表示専用。
-           日付が今日と一致しない場合は警告の見た目になる -->
+      <!-- 接続先の表示。切り替えは管理シートでのみ行うので、ここは表示専用 -->
       <div id="target-line" class="target-line">接続先を確認中…</div>
 
       <!-- この端末にログインが残っているときだけ表示する。
@@ -1225,7 +1227,6 @@
    * ========================================================== */
   let activeTargetKey = null;
   let activeTargetName = null;
-  let activeTargetDateMatches = null;
 
   // 接続先が分かるまでは null を返す。その間は保存を読み書きしない
   function sessionKey() {
@@ -1238,8 +1239,10 @@
   function applyTargetInfo(data) {
     activeTargetKey = data.targetKey || null;
     activeTargetName = data.targetName || null;
-    activeTargetDateMatches =
-      (typeof data.dateMatches === 'boolean') ? data.dateMatches : null;
+    // サーバーは dateMatches も返すが、この画面では意図的に使わない。
+    // スタッフは接続先を変更できないので、日付の不一致を警告しても
+    // 取れる行動がなく、混乱させるだけになる。
+    // 切り替え忘れは、管理シートのD1・管理ツール・毎朝の通知で気づく
     renderTargetLine();
   }
 
@@ -1250,7 +1253,6 @@
   function renderTargetLine(overrideMessage) {
     const el = document.getElementById('target-line');
     el.textContent = '';
-    el.classList.remove('is-warn');
 
     if (overrideMessage) { el.textContent = overrideMessage; return; }
     if (!activeTargetName) { el.textContent = '接続先を確認中…'; return; }
@@ -1261,12 +1263,6 @@
 
     el.appendChild(document.createTextNode('接続先: '));
     el.appendChild(name);
-
-    if (activeTargetDateMatches === false) {
-      el.classList.add('is-warn');
-      el.appendChild(document.createTextNode(
-        '（日付が今日と一致していません。管理者に確認してください）'));
-    }
   }
 
   /**
@@ -1764,6 +1760,8 @@
   }
 
   function stopScannerAndReturnToLogin(message, retryAfterSec, isInfo) {
+    stopMirrorWatcher_();
+
     if (scannerInstance) {
       scannerInstance.clear().catch(() => {});
       scannerInstance = null;
@@ -1872,6 +1870,83 @@
     btn.textContent = LOGIN_BTN_LABEL;
   }
 
+  /* ==========================================================
+   * インカメラのときだけ映像を左右反転する
+   * ==========================================================
+   * 前面カメラの映像はそのまま表示されるため、QRコードを右に動かすと
+   * 画面では左に動く。狙いを合わせるのが難しい。
+   * スマホの自撮り画面と同じように、映像だけを鏡像にして合わせやすくする。
+   *
+   * 【読み取りには影響しない】
+   * CSSの transform は見た目だけを変える。html5-qrcode は video から
+   * canvas へフレームをコピーして解析するが、drawImage が写すのは
+   * 変換前の元フレームなので、デコーダは反転していない映像を見ている。
+   * 鏡像になったQRコードは通常デコードできないため、ここは重要な点。
+   *
+   * 【カメラの切り替えに追従する】
+   * html5-qrcode の標準UIにはカメラ選択があり、実行中に切り替えられる。
+   * 切り替えると新しいストリームが流れ込むので、再生が始まるたびに
+   * 見直している。videoごと作り直される場合に備えて、
+   * MutationObserver でも拾っている
+   * ========================================================== */
+  let mirrorObserver = null;
+
+  function isFrontFacingTrack_(track) {
+    const settings = (track && track.getSettings) ? track.getSettings() : {};
+    if (settings.facingMode === 'user') return true;
+    if (settings.facingMode === 'environment') return false;
+
+    // facingMode を返さない端末（主にPCの内蔵カメラ）向けの手がかり。
+    // ラベルは機種と言語で変わるので、代表的な語だけ見る
+    const label = String((track && track.label) || '').toLowerCase();
+    if (/front|user|facetime|内側|前面|フロント/.test(label)) return true;
+    if (/back|rear|environment|外側|背面|リア/.test(label)) return false;
+
+    // 判定できないときは反転しない。既定は背面カメラなので、現状維持が安全
+    return false;
+  }
+
+  function applyMirror_(video) {
+    let front = false;
+    try {
+      const stream = video.srcObject;
+      const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+      if (track) front = isFrontFacingTrack_(track);
+    } catch (e) {
+      // 取れなくても映像の表示は続ける
+    }
+    video.classList.toggle('is-mirrored', front);
+  }
+
+  function startMirrorWatcher_() {
+    const container = document.getElementById('reader');
+    if (!container || mirrorObserver) return;
+
+    const hook = function (video) {
+      if (video.dataset.mirrorHooked) return;
+      video.dataset.mirrorHooked = '1';
+      video.addEventListener('loadedmetadata', function () { applyMirror_(video); });
+      video.addEventListener('playing', function () { applyMirror_(video); });
+      applyMirror_(video);
+    };
+
+    const scan = function () {
+      const video = container.querySelector('video');
+      if (video) hook(video);
+    };
+
+    mirrorObserver = new MutationObserver(scan);
+    mirrorObserver.observe(container, { childList: true, subtree: true });
+    scan();
+  }
+
+  function stopMirrorWatcher_() {
+    if (mirrorObserver) {
+      mirrorObserver.disconnect();
+      mirrorObserver = null;
+    }
+  }
+
   function startScanner() {
     scannerInstance = new Html5QrcodeScanner(
       "reader",
@@ -1896,6 +1971,8 @@
       lookupUser(decodedText);
       // pause/resumeは行わない：カメラを止めず、連続で次のQRコードを検出し続ける
     });
+
+    startMirrorWatcher_();
   }
 
   /* ---- 名前検索画面 ---- */
