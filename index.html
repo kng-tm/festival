@@ -901,8 +901,10 @@
 
         if (attempt < retryLimit) {
           if (onRetry) onRetry(attempt + 1);
-          // 少し待ってから再試行する（瞬間的な不調を吸収するため）
-          await new Promise(r => setTimeout(r, FETCH_RETRY_WAIT_MS * (attempt + 1)));
+          // 4レーンが同時に失敗したとき、揃って再試行すると混雑が持続する。
+          // 待ち時間を散らして衝突を崩す
+          const base = FETCH_RETRY_WAIT_MS * (attempt + 1);
+          await new Promise(r => setTimeout(r, base * (0.5 + Math.random())));
         }
       }
     }
