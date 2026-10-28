@@ -715,8 +715,8 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
-      <h1>QRコード情報照会</h1>
-      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
+      <h1>QRコード入場券照会</h1>
+      <p class="subtitle">Classroomで配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
 
       <!-- 接続先の表示。切り替えは管理シートでのみ行うので、ここは表示専用 -->
       <div id="target-line" class="target-line">接続先を確認中…</div>
@@ -899,6 +899,52 @@
   const REFETCH_WAIT_MS = 4000;
   const REFETCH_TIMEOUT_MS = 8000; // 裏で走る取り直しの上限
   let rosterFetchInFlight = false; // 取り直しが走っている間は、重ねて走らせない
+
+  /* ---- 着地を待たせている読み取り ----
+     待ちきれずに「もう一度読み取ってください」と出した読み取りを、
+     IDと世代だけ覚えておく。裏で走っている取得が着地したとき、
+     まだ同じ読み取りのままなら結果を出し直す。
+
+     【これが無いと読み直しが2回必要になる】
+     切り上げは4秒、裏の取得は8秒まで続く。つまり案内を出してから
+     最大4秒は取得中のままで、その間に読み直しても
+     rosterFetchInFlight で取り直しが止められ、同じ案内が出る。
+     着地してもそれを拾う者がいないので、3回目でようやく見つかる。
+     覚えておけば、着地した時点で出せるので読み直しが0回になる。
+
+     1件だけで足りる。読み取りは1レーンで1件ずつしか進まず、
+     新しく読めば世代が変わって古い方は無効になる */
+  let awaitingRoster = null; // { generation, qrId }
+
+  /* ---- 名簿が取れなかったときの案内 ----
+     「名簿を確認できませんでした」だけでは、スタッフが次に何をすべきか
+     分からない。取得失敗には refetchedForIds の印を立てていないので、
+     読み直せば必ず取り直しが走る。だから1回目は読み直しを促す。
+
+     ただし連続して失敗しているなら、読み直しても同じ結果になる。
+     そのときだけ別の手に誘導する。
+
+     名前検索を勧めているのは、QRの読み取り違いや別イベントのQRで
+     違うIDが出た場合に、本人が手元の名簿に載っているため。
+     当日追加された人の場合は名前でも見つからないが、その場合も
+     「候補がありません」と確定するので、スタッフは次に進める。
+
+     【「係員に連絡」とは書かないこと】
+     通信障害は4レーン同時に起きる。全員に連絡を促すと、
+     同じ内容の報告が短時間にまとめて届き、管理者が状況を
+     掴むどころか対応で埋まる。画面で完結する手だけを示す。
+
+     自動で再試行しないのは、取り直しを再試行0回にしたのと同じ理由。
+     人の操作のほうが間隔が空き、混雑への追い打ちになりにくい */
+  const ROSTER_FAIL_ESCALATE = 2; // この回数続けて失敗したら案内を変える
+  let rosterFailStreak = 0;
+
+  function rosterFailMessage_() {
+    rosterFailStreak++;
+    return (rosterFailStreak >= ROSTER_FAIL_ESCALATE)
+      ? '通信が不安定です。名前で検索してください'
+      : '名簿を確認できませんでした。もう一度読み取ってください';
+  }
 
   /* ---- 通信処理（タイムアウトと自動再試行） ---- */
   const FETCH_MAX_RETRIES = 2;     // 初回を含めて最大3回試行する
@@ -1888,6 +1934,7 @@
     // 取り残した取得が後から rosterData を埋めることはあるが、
     // 入り直しの際に必ず取り直すので上書きされる
     rosterFetchInFlight = false;
+    awaitingRoster = null; // 待たせていた読み取りも破棄する
     for (const k in refetchedForIds) delete refetchedForIds[k];
 
     awaitingConfirm = false;
@@ -2135,6 +2182,7 @@
       );
 
       if (data.success) {
+        rosterFailStreak = 0; // 取れたので、連続失敗の数え直し
         rosterData = data.list;
         rosterData.forEach(function (p) {
           // 入力のたびに全件を変換すると無駄なので、正規化済みの名前を持たせておく
@@ -2268,7 +2316,7 @@
           '<div class="r-sub"></div>' +
         '</div>' +
         '<span class="chip ' + (p.checked ? 'chip-checked' : 'chip-unchecked') + '">' +
-          (p.checked ? '照会済み' : '未照会') +
+          (p.checked ? '入場済み' : '未入場') +
         '</span>';
       // 名前・メールはtextContentで入れることでHTMLとして解釈されないようにする
       item.querySelector('.r-name').textContent = p.name;
@@ -2343,7 +2391,15 @@
       return;
     }
 
-    scheduleResult(myGeneration, { ok: false, message: notFoundMessage_(qrId) });
+    // 取り直しが走っている最中に読まれた場合（待ちを切り上げた直後の
+    // 読み直しがここに来る）。着地したら拾い直せるよう覚えておく。
+    // これが無いと、着地を拾う者がいないので3回目の読み取りが必要になる
+    if (rosterFetchInFlight) {
+      awaitingRoster = { generation: myGeneration, qrId: String(qrId) };
+    }
+
+    scheduleResult(myGeneration,
+      { ok: false, neutral: rosterFetchInFlight, message: notFoundMessage_(qrId) });
   }
 
   function findInRoster(qrId) {
@@ -2357,14 +2413,18 @@
    *                  名前検索を開くと名簿を取り直し、同時に refetchedForIds も
    *                  白紙に戻るので、案内がそのまま復旧操作にもなっている
    *   取り直し中   … 待ちきれずに先に結果を出した場合。取得は裏で続いている。
-   *                  「見つかりません」と断定せず、待ちであることを伝える
-   *   クールダウン中 … もう一度読めば取り直しが走る。
+   *                  着地すれば resolveAwaitingRoster_ が必ず結論を出すので、
+   *                  読み直しを促さず待ってもらう。
+   *                  ここで「もう一度読み取ってください」と出すと、
+   *                  読み直してもまた取り直し中に当たって同じ案内が出るだけで、
+   *                  スタッフに無駄な操作をさせることになる
+   *   クールダウン中 … 取り直しは走っていない。もう一度読めば走る。
    *                    ROSTER_REFETCH_COOLDOWN_MS が SCAN_COOLDOWN_MS 以下
    *                    なので、この案内は必ず成立する
    */
   function notFoundMessage_(qrId) {
     if (refetchedForIds[String(qrId)]) return '対象者が見つかりません（名前で検索してください）';
-    if (rosterFetchInFlight) return '名簿を確認中です（もう一度読み取ってください）';
+    if (rosterFetchInFlight) return '名簿を確認しています。少しお待ちください';
     return '対象者が見つかりません（もう一度読み取ってください）';
   }
 
@@ -2396,20 +2456,32 @@
    * 待つのは REFETCH_WAIT_MS までで、それを過ぎたら結果を先に出して
    * レーンを解放する。取得そのものは裏で続ける（止めても得がない）。
    *
-   * 裏に回った取得が後から成功した場合、画面には何も出さない。
-   * 既に「もう一度読み取ってください」と案内済みで、
-   * 読み直せば新しい名簿で見つかるため。
-   * 勝手に結果を出すと、スタッフが別の人のQRを構えている最中に
-   * 前の人の結果が割り込むことになる
+   * 裏に回った取得が後から着地したら、awaitingRoster に覚えておいた
+   * 読み取りを拾い直す（resolveAwaitingRoster_）。
+   * 読み直しの手間をなくすためで、別の人を読んでいれば世代が変わって
+   * いるので割り込まない
    */
   async function refetchThenLookup(myGeneration, qrId) {
     const loadingEl = document.getElementById('loading');
     loadingEl.innerHTML = '<span class="spinner"></span> 名簿を確認しています...';
 
     rosterFetchInFlight = true;
+
+    // 着地したかどうかを控えておく。
+    // 待ちを切り上げた直後に着地した場合、着地側は awaitingRoster を
+    // まだ見られない（こちらがまだ入れていない）。その取りこぼしを防ぐため、
+    // 切り上げ側からも拾えるようにしてある
+    let fetchSettled = false, fetchOk = false;
+
     const fetching = loadRoster(null, 0, REFETCH_TIMEOUT_MS)
-      .then(function (ok) { rosterFetchInFlight = false; return ok; },
-            function () { rosterFetchInFlight = false; return false; });
+      .then(function (ok) { return ok; }, function () { return false; })
+      .then(function (ok) {
+        rosterFetchInFlight = false;
+        fetchSettled = true;
+        fetchOk = ok;
+        resolveAwaitingRoster_(ok); // 切り上げ済みなら、ここで拾い直す
+        return ok;
+      });
 
     // 取得の完了と、待ちの打ち切りを競争させる。
     // 打ち切り側が勝っても fetching は解決し続ける（捨てていない）
@@ -2427,12 +2499,23 @@
     if (!waited.done) {
       // 待ちきれなかった。レーンを止め続けないよう、ここで結果を出す。
       // refetchedForIds には入れない（居ないと確認できていないため）
-      showResult(myGeneration, { ok: false, message: notFoundMessage_(qrId) });
+      awaitingRoster = { generation: myGeneration, qrId: String(qrId) };
+
+      // 切り上げと着地がほぼ同時だった場合は、着地側が awaitingRoster を
+      // 見る前に通り過ぎている。その場合はここで拾う
+      if (fetchSettled) {
+        resolveAwaitingRoster_(fetchOk);
+        return;
+      }
+
+      // ここでは必ず取り直しが走っている（だから切り上げた）ので、
+      // 文面は「確認しています」になる。進行中なので赤で出さない
+      showResult(myGeneration, { ok: false, neutral: true, message: notFoundMessage_(qrId) });
       return;
     }
 
     if (!waited.ok) {
-      showResult(myGeneration, { ok: false, message: '対象者が見つかりません（名簿を確認できませんでした）' });
+      showResult(myGeneration, { ok: false, message: rosterFailMessage_() });
       return;
     }
 
@@ -2442,6 +2525,56 @@
     } else {
       refetchedForIds[String(qrId)] = true; // 取り直しても居なかったので、もう取りに行かない
       showResult(myGeneration, { ok: false, message: notFoundMessage_(qrId) });
+    }
+  }
+
+  /**
+   * 裏で走っていた名簿の取得が着地したときに、待たせたままの読み取りを拾い直す。
+   *
+   * これがあることで、読み直しの手間がなくなる。
+   * 切り上げは4秒・裏の取得は8秒までなので、着地は案内を出してから
+   * 0〜4秒後に来る。結果パネルが自動で閉じるのも4秒後なので、
+   * ほとんどの場合はパネルが開いたまま中身が差し替わる。
+   *
+   * 【割り込まないための条件】
+   *   世代が変わっていない … 別の人のQRを読んでいたら何もしない。
+   *                          受付を終了した場合も世代が進むので対象外になる
+   *   確認待ちでない       … 既に出ている結果を上書きしない
+   *
+   * 見つかった場合は、読み取りをやり直したのと同じ扱いにする
+   * （確認ボタンが出て、押すまで次に進まない）。
+   * スタッフが見落としたまま次の人に進むことはない。
+   *
+   * 居なかった場合も黙らず、「名前で検索してください」に差し替える。
+   * 読み直しても結果は変わらないので、無駄な読み直しを促さないため
+   */
+  function resolveAwaitingRoster_(ok) {
+    const pending = awaitingRoster;
+    awaitingRoster = null;
+
+    if (!pending) return;
+    if (pending.generation !== lookupGeneration) return; // 次の人を読んでいる
+    if (awaitingConfirm) return;                         // 確認待ちの結果が出ている
+
+    // 取得そのものが失敗した場合も、必ず結論を出す。
+    // 黙って終わると「確認しています」のまま放置されてしまう
+    if (!ok) {
+      openSheet();
+      showResult(pending.generation, { ok: false, message: rosterFailMessage_() });
+      return;
+    }
+
+    const person = findInRoster(pending.qrId);
+
+    // 自動で閉じたあとに着地することもあるので、開き直してから出す。
+    // 既に開いていれば、閉じるまでの時間が延びるだけ
+    openSheet();
+
+    if (person) {
+      showResult(pending.generation, commitCheckIn(person));
+    } else {
+      refetchedForIds[String(pending.qrId)] = true;
+      showResult(pending.generation, { ok: false, message: notFoundMessage_(pending.qrId) });
     }
   }
 
@@ -2499,7 +2632,14 @@
     nameEl.classList.remove('placeholder-row');
 
     if (!result.ok) {
-      nameEl.innerHTML = '<span class="res-error">' + result.message + '</span>';
+      if (result.neutral) {
+        // 異常ではなく進行中の案内（「名簿を確認しています」）。
+        // 赤いエラー表示で出すと、取得待ちなのに失敗したように見える
+        nameEl.classList.add('placeholder-row');
+        nameEl.innerText = result.message;
+      } else {
+        nameEl.innerHTML = '<span class="res-error">' + result.message + '</span>';
+      }
       deptEl.innerText = '';
       badgeEl.innerHTML = '';
       lotteryBanner.classList.add('hidden');
@@ -2520,8 +2660,8 @@
     deptEl.innerText = '人数: ' + person.count + '名';
 
     badgeEl.innerHTML = result.alreadyChecked
-      ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
-      : '<span class="badge badge-ok">✓ 新規照会</span>';
+      ? '<span class="badge badge-warn">⚠ 入場済み（再入場）</span>'
+      : '<span class="badge badge-ok">✓ 新規入場</span>';
 
     if (person.isLottery) {
       // 再生のたびにアニメーションが走るよう、一度リセットしてから付け直す
