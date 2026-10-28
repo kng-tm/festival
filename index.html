@@ -715,8 +715,8 @@
     <!-- ログイン画面 -->
     <div id="login-area">
       <div class="brand" style="margin-bottom:18px;"><span class="dot"></span>SECURE CHECK-IN</div>
-      <h1>QRコード入場券照会</h1>
-      <p class="subtitle">Classroomで配布されたアカウントでログインし、QRコードをスキャンしてください。</p>
+      <h1>QRコード情報照会</h1>
+      <p class="subtitle">組織アカウントでログインし、QRコードをスキャンしてください。</p>
 
       <!-- 接続先の表示。切り替えは管理シートでのみ行うので、ここは表示専用 -->
       <div id="target-line" class="target-line">接続先を確認中…</div>
@@ -877,13 +877,26 @@
      人の操作のほうが間隔が空くので、混雑への追い打ちにもなりにくい */
   // 待ちを切り上げる時点。
   //
+  // 【取り直しの所要より長くすること。ここが短いと読み直しが増える】
+  // 取り直しは正常時 1秒前後だが、混雑すると3秒近くまで伸びる。
+  // 以前ここは SCAN_COOLDOWN_MS（2.5秒）だったが、それでは
+  // 「あと0.2秒で着地するのに切り上げる」場合が出て、
+  // 取り直しは成功していたのにスタッフが読み直す羽目になっていた。
+  //
+  // 試算では、3割が2.8秒かかる状況で無駄な読み直しが9回。
+  // 混雑が倍（6割）なら18回。4秒にすると、いずれも0回になる。
+  // 待ち時間が伸びるので総遅延が増えそうに見えるが、逆に減る
+  // （切り上げ2.5秒＋読み直し4秒より、待ち切るほうが安い）。
+  //
   // 【SCAN_COOLDOWN_MS より短くしないこと】
   // 切り上げると「もう一度読み取ってください」と案内するが、
   // 同じQRの連続検出は lastScanTime から SCAN_COOLDOWN_MS の間
   // 弾かれる（startScanner の中）。これより短いと、案内した直後の
   // 読み直しが無反応になり、案内が空振りする。
-  // 数値を直接書かずに参照しているのはそのため
-  const REFETCH_WAIT_MS = SCAN_COOLDOWN_MS;
+  //
+  // 上限は REFETCH_TIMEOUT_MS。それを超えても意味がない
+  // （取得そのものが打ち切られているので、待っても着地しない）
+  const REFETCH_WAIT_MS = 4000;
   const REFETCH_TIMEOUT_MS = 8000; // 裏で走る取り直しの上限
   let rosterFetchInFlight = false; // 取り直しが走っている間は、重ねて走らせない
 
@@ -2255,7 +2268,7 @@
           '<div class="r-sub"></div>' +
         '</div>' +
         '<span class="chip ' + (p.checked ? 'chip-checked' : 'chip-unchecked') + '">' +
-          (p.checked ? '入場済み' : '未入場') +
+          (p.checked ? '照会済み' : '未照会') +
         '</span>';
       // 名前・メールはtextContentで入れることでHTMLとして解釈されないようにする
       item.querySelector('.r-name').textContent = p.name;
@@ -2507,8 +2520,8 @@
     deptEl.innerText = '人数: ' + person.count + '名';
 
     badgeEl.innerHTML = result.alreadyChecked
-      ? '<span class="badge badge-warn">⚠ 入場済み（再入場）</span>'
-      : '<span class="badge badge-ok">✓ 新規入場</span>';
+      ? '<span class="badge badge-warn">⚠ 照会済み（再スキャン）</span>'
+      : '<span class="badge badge-ok">✓ 新規照会</span>';
 
     if (person.isLottery) {
       // 再生のたびにアニメーションが走るよう、一度リセットしてから付け直す
